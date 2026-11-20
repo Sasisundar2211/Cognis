@@ -1,0 +1,10 @@
+{
+  "name": "cognis",
+  "private": true,
+  "workspaces": ["worker", "web"],
+  "scripts": {
+    "test": "npm run test -w worker && npm run test -w web",
+    "build": "npm run build -w web",
+    "typecheck": "npm run typecheck -w worker && npm run typecheck -w web"
+  }
+}
