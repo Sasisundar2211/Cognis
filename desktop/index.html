@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Cognis</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="frame">
+      <header class="bar" data-tauri-drag-region>
+        <span class="brand" data-tauri-drag-region>
+          <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" /><path d="M21.5 11.2a7 7 0 1 0 0 9.6" fill="none" stroke="var(--bg)" stroke-width="3" stroke-linecap="round" /><circle cx="21.6" cy="16" r="1.8" fill="var(--bg)" /></svg>
+          Cognis
+        </span>
+        <span class="bar-actions" id="bar-actions" hidden>
+          <span class="hint" id="hotkey-hint"></span>
+          <button class="ghost" id="new-chat" type="button" title="Start a new conversation">New</button>
+          <button class="ghost" id="open-web" type="button" title="Open your library in the browser">Library</button>
+          <button class="ghost" id="sign-out" type="button">Sign out</button>
+        </span>
+        <button class="ghost close" id="hide" type="button" aria-label="Hide Cognis (Esc)">✕</button>
+      </header>
+
+      <main id="signin" hidden>
+        <form id="signin-form" class="signin" novalidate>
+          <h1>Sign in to Cognis</h1>
+          <p class="muted">Ask your saved knowledge from any app. Press the hotkey to bring this window back.</p>
+          <label for="server">Server address</label>
+          <input id="server" type="url" autocomplete="url" placeholder="https://cognis.example.workers.dev" required />
+          <label for="email">Email</label>
+          <input id="email" type="email" autocomplete="email" required />
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" required />
+          <p class="error" id="signin-error" role="alert" hidden></p>
+          <button class="primary" type="submit" id="signin-btn">Sign in</button>
+          <p class="muted small">Your password goes to your Cognis server once. This device then keeps a revocable token in your system keychain. You can sign it out from Account, Devices.</p>
+        </form>
+      </main>
+
+      <main id="chat" hidden>
+        <section id="thread" class="thread" aria-live="polite" aria-label="Conversation">
+          <div class="empty" id="empty">
+            <p class="lead">Ask anything. Cognis answers from what you saved and shows its sources.</p>
+            <p class="muted small">Type <kbd>/save</kbd> and some text to save a note. Esc hides this window.</p>
+          </div>
+        </section>
+        <form id="composer" class="composer">
+          <div class="share" id="share-preview" hidden>
+            <span class="share-label">Sharing this clipboard text with your question:</span>
+            <span class="share-text" id="share-text"></span>
+          </div>
+          <div class="share" id="save-preview" hidden>
+            <span class="share-label">Save this clipboard text to Cognis?</span>
+            <span class="share-text" id="save-text"></span>
+            <span class="composer-row"><button class="primary" type="button" id="save-confirm">Save</button><button class="ghost" type="button" id="save-cancel">Cancel</button></span>
+          </div>
+          <label for="q" class="sr-only">Ask Cognis</label>
+          <textarea id="q" rows="2" placeholder="Ask your library, or /save something" maxlength="2000"></textarea>
+          <div class="composer-row">
+            <label class="toggle"><input type="checkbox" id="include-clip" /> Include clipboard</label>
+            <button class="ghost" type="button" id="save-clip">Save clipboard</button>
+            <span class="spacer"></span>
+            <button class="primary" type="submit" id="ask-btn">Ask</button>
+          </div>
+          <p class="notice" id="notice" role="status" hidden></p>
+        </form>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

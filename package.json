@@ -1,10 +1,14 @@
 {
   "name": "cognis",
   "private": true,
-  "workspaces": ["worker", "web"],
+  "workspaces": [
+    "worker",
+    "web",
+    "desktop"
+  ],
   "scripts": {
-    "test": "npm run test -w worker && npm run test -w web",
     "build": "npm run build -w web",
-    "typecheck": "npm run typecheck -w worker && npm run typecheck -w web"
+    "test": "npm --prefix api run test:unit && npm --prefix api run test:http",
+    "typecheck": "npm run typecheck -w web && npm run build:ui -w desktop"
   }
 }

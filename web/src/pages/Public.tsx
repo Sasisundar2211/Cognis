@@ -97,9 +97,9 @@ export function Landing() {
 }
 
 const PLANS = [
-  { name: "Free", price: "$0", note: "forever", items: ["500 saved items", "50 link imports per day", "10 collections", "Search by words and meaning", "Export and delete anytime"] },
-  { name: "Plus", price: "$3", note: "per month, planned", items: ["10,000 saved items", "500 link imports per day", "200 collections", "Browser extension capture", "Context suggestions while you work"] },
-  { name: "Pro", price: "$8", note: "per month, planned", items: ["50,000 saved items", "2,000 link imports per day", "1,000 collections", "Import from Reddit, GitHub, YouTube, bookmarks", "Priority processing"] },
+  { name: "Free", price: "$0", note: "forever", items: ["500 saved items", "30 answers per day", "Desktop companion", "Search by words and meaning", "Export and delete anytime"] },
+  { name: "Plus", price: "$3", note: "per month, planned", items: ["10,000 saved items", "200 answers per day", "500 link imports per day", "Context suggestions while you work"] },
+  { name: "Pro", price: "$8", note: "per month, planned", items: ["50,000 saved items", "1,000 answers per day", "Import from Reddit, GitHub, YouTube, bookmarks", "Priority processing"] },
 ];
 
 export function Pricing() {
@@ -146,7 +146,7 @@ export function Privacy() {
       <p>This page describes what the current version of Cognis does. It changes when the product changes.</p>
       <h2>What Cognis stores</h2>
       <ul>
-        <li>Your account: email, name, a salted scrypt hash of your password, and your active sessions.</li>
+        <li>Your account: email, name, a salted scrypt hash of your password, and your signed-in browsers and desktop companions (stored as one-way hashes).</li>
         <li>What you save: links, the readable text Cognis extracts from those pages, your notes, tags and collections.</li>
         <li>A numeric embedding of each item, used for search by meaning.</li>
         <li>Security events (for example "signed in", "item deleted") with a timestamp. These never contain item content.</li>
@@ -154,12 +154,12 @@ export function Privacy() {
       <h2>What Cognis does not do</h2>
       <ul>
         <li>No ads, no analytics scripts, no third-party trackers, no selling data.</li>
-        <li>No reading of your browser, clipboard, screen, camera or microphone. A browser extension is planned; it will only capture a page when you click it.</li>
+        <li>No reading of your screen, camera or microphone. The desktop companion reads your clipboard only when you click Include clipboard or Save clipboard, and shows the text first.</li>
         <li>No other user can see your items. Every request is checked against your account.</li>
       </ul>
       <h2>Who processes your data</h2>
       <ul>
-        <li>Cloudflare hosts the app and database (Workers and D1) and computes embeddings with Workers AI.</li>
+        <li>Cloudflare hosts the app and database (Workers and D1) and runs the open models for search and answers (Workers AI). Your question, the matching saved items, and any text you chose to share are sent to that model to write the answer. Cognis does not store your questions or answers.</li>
         <li>If email is enabled, Resend delivers verification and password reset emails.</li>
         <li>When you save a link, Cognis fetches that page from its server, identifying itself as CognisBot.</li>
       </ul>
@@ -187,11 +187,13 @@ export function Help() {
       <p>Press / anywhere to jump to search.</p>
       <h2>Organizing</h2>
       <p>Add tags when you save or edit. Group items into collections from an item's page. Archive items to keep them out of search without deleting them.</p>
+      <h2>Desktop companion</h2>
+      <p>Install the Cognis desktop app and press Ctrl + Shift + Space (Cmd + Shift + Space on Mac) from any app. A small window opens over your work. Ask a question and Cognis answers from what you saved, with numbered sources you can open. Press Esc to hide it. It reads your clipboard only when you choose to share or save it, and shows you the text first.</p>
       <h2>What is not built yet</h2>
       <ul>
-        <li>Browser extension for one-click capture.</li>
         <li>Context suggestions that surface saved items while you work.</li>
         <li>Imports from Reddit, GitHub, YouTube and browser bookmarks.</li>
+        <li>Document upload.</li>
       </ul>
     </Prose>
   );

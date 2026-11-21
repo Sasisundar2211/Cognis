@@ -2,61 +2,73 @@
 
 ## Topology
 
-One Cloudflare Worker serves everything from one origin:
-
 ```
-Browser ──HTTPS──> Worker (cognis)
-                    ├─ /api/auth/*  -> Better Auth
-                    ├─ /api/v1/*    -> Hono API (requires session)
-                    └─ everything else -> static assets (React SPA)
-                   Bindings: D1 (DB), Workers AI (AI), Rate Limiting (API_LIMITER, INGEST_LIMITER)
-```
-
-One origin means no CORS, first-party `SameSite=Lax` cookies, and one deploy. No microservices.
-
-## Code layout
-
-```
-worker/
-  migrations/          D1 schema, versioned SQL
-  src/index.ts         routes, middleware order
-  src/auth.ts          Better Auth config
-  src/middleware.ts    request id, security headers, CSRF guard, session, rate limits
-  src/routes/          items, search, collections, account (me, tags, sources, export)
-  src/knowledge/       KnowledgeObject service: create, process, update, delete, tags
-  src/ingest/          URL safety (SSRF), safe fetch, HTML extraction
-  src/retrieval/       embedder interface, filters, hybrid search + RRF
-  test/                Vitest suites run inside workerd with a real D1
-web/
-  src/pages/           screens
-  src/components/      shell, composer, item rows, UI primitives
-  public/_headers      CSP and security headers for static assets
-e2e/journey.cjs        Playwright browser journey
+ Desktop companion (Tauri, Rust)          Browser (React SPA)
+   hotkey -> floating window                 library, search, account
+   Bearer device token (OS keychain)         HttpOnly session cookie
+            \                                 /
+             \--------- HTTPS ---------------/
+                            |
+            Cloudflare Worker "cognis" (Rust, wasm32)
+              /api/auth/*   accounts, sessions, device tokens
+              /api/v1/*     items, search, ask, collections, export
+              /*            static web app (assets binding)
+            Bindings: D1 (DB), Workers AI (AI), Rate Limiting
 ```
 
-## Data model
+One Worker, one origin, one deploy. No microservices.
 
-`knowledge_items` is the KnowledgeObject. Key fields: `id` (public), `seq` (stable integer rowid for FTS), `user_id`, `kind` (url, text, note, capture), `title`, `original_url`, `canonical_url`, `source_platform`, `description`, `content` (user text), `extracted_text` (page text), `content_hash`, `metadata` (JSON), `status` (pending, processing, ready, failed), `error_code`, `attempts`, `archived`, `embedding` (Float32 BLOB), `embedding_model`, timestamps.
+## The Grok-style workflow
 
-Tenant isolation is enforced at three layers:
-1. Every query filters by `user_id` from the session. No code path loads a row by id alone.
-2. Join tables (`item_tags`, `collection_items`) carry `user_id` with composite foreign keys `(user_id, id)`, so the database rejects links between objects of different users.
-3. `ON DELETE CASCADE` from `user` removes all owned rows when an account is deleted.
+1. The companion runs in the tray. The global hotkey (Ctrl/Cmd + Shift + Space) shows an always-on-top window.
+2. The user asks a question. Optionally they share clipboard text after seeing a preview.
+3. The Rust core in the companion posts to `POST /api/v1/ask` with the device token.
+4. The API runs hybrid search over the user's own items (top 6, ready, not archived).
+5. It streams server-sent events: `status` (searching), `sources` (numbered items), `status` (writing), `delta` (answer text), `done`.
+6. The answer comes from an open-weights model on Workers AI, instructed to cite `[n]` and to treat sources as untrusted data.
+7. The companion renders citations as buttons that open the original links, keeps 6 turns for follow-ups, and hides on Esc.
 
-Deduplication: unique `(user_id, canonical_url)` for links, unique `(user_id, content_hash)` for text.
+Without the language model (local dev, outage, quota), `/ask` returns the matching sources and says no written answer is available.
 
-## Ingestion pipeline
+## API code layout (`api/src`)
 
-Receive -> validate (Zod, strict schemas) -> sanitize (strip control and bidi characters, NFC) -> normalize URL (canonical form, tracking params removed) -> dedupe -> store (status pending) -> fetch (SSRF-checked, every redirect re-validated, 1 MB cap, 8 s timeout, HTML or text only) -> extract (HTMLRewriter, text only) -> embed -> index (FTS5 triggers) -> status ready.
+| Module | Responsibility |
+|---|---|
+| `lib.rs` | Worker entry: static assets vs API, security headers, access log |
+| `routes.rs` | Dispatch, validation, items, search, ask, collections, account, export |
+| `auth.rs` | Sign-up, sign-in, verification, reset, change password, sessions, device tokens, deletion, rate limits |
+| `password.rs` | scrypt hashing, constant-time verify |
+| `knowledge.rs` | KnowledgeObject service: create, dedupe, process (fetch, extract, embed), update, delete, tags |
+| `ingest/` | URL safety (SSRF), safe fetch with redirect re-validation, HTML extraction (lol_html) |
+| `retrieval/` | Embedder, filters, ranking (terms, RRF, explanations), D1 search |
+| `ask.rs` | Prompt building, delimiter hardening, SSE framing, model stream parsing, citation checks |
+| `db.rs`, `http.rs`, `error.rs`, `util.rs`, `email.rs`, `audit.rs`, `plans.rs` | Helpers |
 
-Text items process in the request. URL items process after the response in `waitUntil`. Failures store a stable `error_code` and can be retried up to 5 attempts.
+Pure logic (`util`, `password`, `ingest`, `retrieval/rank`, `retrieval/embed`, `ask`) compiles natively and has unit tests. Worker-bound code is covered by the HTTP suite.
+
+## Data model (`api/migrations/0001_init.sql`)
+
+- `users`: email (lowercase, unique), name, scrypt hash, verified flag, plan.
+- `sessions`: SHA-256 of the token only. `kind` is `browser` (30 days) or `device` (365 days, labeled).
+- `email_tokens`: SHA-256 of verification and reset tokens, single use, expiring.
+- `auth_rate_limits`: fixed-window counters keyed by a hash of route and IP or email.
+- `knowledge_items`, `tags`, `item_tags`, `collections`, `collection_items`, `knowledge_fts`, `audit_events`: as before. Join tables carry `user_id` with composite foreign keys so rows can never link objects of different users. Deleting a user cascades to everything.
 
 ## Retrieval
 
-- Lexical: FTS5 with Porter stemming, BM25 with column weights title 4, description 2, content 1, page text 1. Query terms are tokenized and individually quoted, so FTS syntax in user input is inert.
-- Semantic: query embedded with bge-small-en-v1.5, cosine against stored item vectors for the user's newest 2,000 items, floor 0.45 (uncalibrated starting value).
-- Hybrid: Reciprocal Rank Fusion, `score = sum(1 / (60 + rank))`.
-- Fallback: if the embedder is missing or fails, search answers lexically and the response sets `degraded: true`; the UI says so.
-- Explanations come only from retrieval evidence: which retriever matched and which terms FTS highlighted.
+- Lexical: FTS5, Porter stemming, BM25 weights title 4, description 2, content 1, page text 1. Every query term is quoted.
+- Semantic: brute-force cosine over the user's newest 2,000 embeddings stored in D1 (Vectorize's free tier holds about 13,000 vectors in total, too few for many users).
+- Hybrid: RRF with k = 60. Explanations come only from evidence: which retriever matched and which terms FTS highlighted.
 
-Why brute-force vectors in D1 instead of Vectorize: Vectorize's free tier stores 5M dimensions in total (about 13,000 vectors at 384 dims across all users). D1's free tier holds 5 GB. Brute force over 2,000 vectors per user is cheap. Move to Vectorize with per-user namespaces when libraries outgrow the scan limit; the `search.ts` semantic function is the single swap point.
+## Desktop code layout (`desktop/`)
+
+| File | Responsibility |
+|---|---|
+| `src-tauri/src/lib.rs` | Tray, global hotkey, window toggle, commands, keychain, config |
+| `src-tauri/src/api.rs` | HTTPS client, server URL validation, SSE parser |
+| `src/main.ts` | UI: sign-in, conversation, streaming render, citations, clipboard preview |
+| `src-tauri/capabilities/default.json` | The web view may only call Cognis commands and hide the window |
+
+## Why the TypeScript worker is still here
+
+`worker/` was the first implementation (Hono + Better Auth). The Rust API replaces it and keeps the same HTTP contract for items, search and collections. Auth endpoints changed. It stays in the repo as a reference and is not deployed.

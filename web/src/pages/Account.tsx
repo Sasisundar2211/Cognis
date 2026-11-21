@@ -32,6 +32,33 @@ function Meter({ used, max, label }: { used: number; max: number; label: string 
   );
 }
 
+function DeviceList() {
+  const [list, setList] = useState<Awaited<ReturnType<typeof authClient.listSessions>> | null>(null);
+  const load = () => authClient.listSessions().then(setList);
+  useEffect(() => {
+    void load();
+  }, []);
+  if (!list) return <div className="skeleton h-12 w-full max-w-md" aria-hidden="true" />;
+  return (
+    <ul className="grid max-w-md divide-y divide-line rounded-xl border border-line">
+      {list.map((s) => (
+        <li key={s.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-[0.875rem]">
+          <span className="min-w-0">
+            <span className="text-ink">{s.kind === "device" ? s.label || "Desktop companion" : "Browser"}</span>
+            {s.current && <span className="ml-2 text-[0.75rem] text-success">This browser</span>}
+            <span className="block text-[0.75rem] text-ink-2">Last used {new Date(s.lastUsedAt).toLocaleString()}</span>
+          </span>
+          {!s.current && (
+            <Button size="sm" variant="ghost" onClick={async () => { await authClient.revokeSession(s.id); await load(); }}>
+              Sign out
+            </Button>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function Account() {
   const nav = useNavigate();
   const [me, setMe] = useState<Me | null>(null);
@@ -93,7 +120,7 @@ export function Account() {
             e.preventDefault();
             if (next.length < 10) return setPwMsg({ tone: "error", text: "Use at least 10 characters." });
             setPwBusy(true);
-            const { error } = await authClient.changePassword({ currentPassword: cur, newPassword: next, revokeOtherSessions: true });
+            const { error } = await authClient.changePassword({ currentPassword: cur, newPassword: next });
             setPwBusy(false);
             if (error) return setPwMsg({ tone: "error", text: authErrorMessage(error) });
             setCur("");
@@ -112,14 +139,15 @@ export function Account() {
         </form>
       </Section>
 
-      <Section title="Sessions" description="Sign out of Cognis on every other browser and device.">
+      <Section title="Devices" description="Browsers and desktop companions signed in to your account.">
         <div className="grid gap-3">
           {revokeMsg && <Notice tone="success">{revokeMsg}</Notice>}
+          <DeviceList key={revokeMsg ?? ""} />
           <div>
             <Button
               onClick={async () => {
                 const { error } = await authClient.revokeOtherSessions();
-                setRevokeMsg(error ? null : "Signed out everywhere else.");
+                setRevokeMsg(error ? null : `Signed out everywhere else at ${new Date().toLocaleTimeString()}.`);
               }}
             >
               Sign out other sessions

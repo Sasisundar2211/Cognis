@@ -2,43 +2,42 @@
 
 Cognis remembers what you learn and brings it back when it becomes useful.
 
-Save links and notes from anywhere. Cognis reads the page, keeps the original source, and finds it again by words or by meaning. Each search result says why it matched.
+Save links and notes from anywhere. Press a hotkey on your desktop and ask. Cognis answers from what you saved, cites the sources, and links back to the originals.
 
 ## Status
 
-Core product works locally: accounts, saving, import, library, collections, hybrid search, export, account deletion. Not yet deployed. Browser extension and context suggestions are not built yet. See [docs/IMPLEMENTATION-STATUS.md](docs/IMPLEMENTATION-STATUS.md).
+Works locally end to end: accounts, saving, link import, library, collections, hybrid search, Grok-style ask, desktop companion, export, account deletion. Not yet deployed. See [docs/IMPLEMENTATION-STATUS.md](docs/IMPLEMENTATION-STATUS.md).
 
-## Stack
+## Parts
 
-All open source, running on Cloudflare's free tier.
+| Folder | What | Stack |
+|---|---|---|
+| `api/` | API and web host | Rust on Cloudflare Workers (workers-rs), D1 (SQLite + FTS5), Workers AI |
+| `desktop/` | Desktop companion: hotkey, floating window, ask, save | Rust + Tauri 2, TypeScript UI |
+| `web/` | Web app: library, search, collections, account | React 19, Tailwind 4, Vite |
+| `worker/` | Superseded TypeScript API, kept for reference | Hono, Better Auth |
 
-| Layer | Choice |
-|---|---|
-| API | Cloudflare Workers, Hono, TypeScript, Zod |
-| Auth | Better Auth (email + password, sessions, verification, reset) |
-| Database | Cloudflare D1 (SQLite) with FTS5 full-text search |
-| Embeddings | Workers AI `bge-small-en-v1.5` (384 dims) |
-| Search | BM25 + cosine similarity, fused with Reciprocal Rank Fusion (k=60) |
-| Web | React 19, React Router, Tailwind CSS 4, Vite, served as Worker static assets |
-| Tests | Vitest in the Workers runtime, Playwright for the browser journey |
+Search: BM25 full-text plus `bge-small-en-v1.5` embeddings, fused with Reciprocal Rank Fusion (k=60). Answers: `llama-3.1-8b-instruct` on Workers AI, citing sources. Everything is open source.
 
 ## Quick start
 
 ```sh
 npm install
 npm run build -w web
-cd worker
+cargo install worker-build@0.9.0
+rustup target add wasm32-unknown-unknown
+cd api
 npx wrangler d1 migrations apply cognis-dev --local -c wrangler.dev.jsonc
-echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)" > .dev.vars
-npx wrangler dev -c wrangler.dev.jsonc
+npx wrangler dev -c wrangler.dev.jsonc          # http://localhost:8787
 ```
 
-Open http://localhost:8787.
+Desktop companion: see [docs/DESKTOP.md](docs/DESKTOP.md).
 
 ## Docs
 
 - [Implementation status](docs/IMPLEMENTATION-STATUS.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Desktop companion](docs/DESKTOP.md)
 - [Security](docs/SECURITY.md)
 - [Local development](docs/LOCAL-DEVELOPMENT.md)
 - [Production deployment](docs/PRODUCTION-DEPLOYMENT.md)

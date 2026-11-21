@@ -1,36 +1,52 @@
 # Local development
 
-Requirements: Node.js 22+, npm 10+.
+Requirements: Rust 1.85+ with `wasm32-unknown-unknown`, `worker-build` 0.9, Node.js 22+, npm 10+.
 
 ```sh
-npm install                      # root .npmrc sets legacy-peer-deps (works around an npm 10 peer resolution bug)
-npm run build -w web             # builds the SPA into web/dist, which the Worker serves
-cd worker
-npx wrangler d1 migrations apply cognis-dev --local -c wrangler.dev.jsonc
-echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)" > .dev.vars
-npx wrangler dev -c wrangler.dev.jsonc   # http://localhost:8787
+rustup target add wasm32-unknown-unknown
+cargo install worker-build@0.9.0
+npm install                 # root .npmrc sets legacy-peer-deps (npm 10 peer resolution bug)
+npm run build -w web        # the Worker serves web/dist
 ```
 
-Use `localhost`, not `127.0.0.1`, in the browser. Auth checks the origin against `BETTER_AUTH_URL`.
+## API + web app
 
-For frontend hot reload, keep `wrangler dev` running and in another terminal run `npm run dev -w web` (Vite on :5173 proxies `/api` to :8787). Set `BETTER_AUTH_URL` to `http://localhost:5173` in `wrangler.dev.jsonc` while doing so.
+```sh
+cd api
+npx wrangler d1 migrations apply cognis-dev --local -c wrangler.dev.jsonc --persist-to .wrangler/dev
+npx wrangler dev -c wrangler.dev.jsonc --persist-to .wrangler/dev     # builds the Rust Worker, serves http://localhost:8787
+```
 
-## Local differences from production
+Use `localhost`, not `127.0.0.1`, in the browser (origin checks use `APP_URL`).
 
-| Setting | Local (`wrangler.dev.jsonc`) | Production (`wrangler.jsonc`) |
+Local differences from production:
+
+| Setting | Local | Production |
 |---|---|---|
-| Embeddings | `EMBEDDER=none`: search runs lexical only and shows a notice | Workers AI |
-| Email | `EMAIL_MODE=disabled`: no verification | `resend` once a domain exists |
-| Database | Local SQLite under `.wrangler/` | D1 |
+| `EMBEDDER` | `none`: search is lexical, the UI says so | `workers-ai` |
+| Answers | Not available: `/ask` returns sources only | Workers AI LLM |
+| `EMAIL_MODE` | `disabled`: no verification | `resend` once a domain exists |
 
-## Commands
+## Desktop companion
 
 ```sh
-npm test -w worker          # 75 tests in the Workers runtime
-npm run typecheck           # worker + web
-node e2e/journey.cjs /tmp   # browser journey against a running wrangler dev
+cd desktop
+npm run dev          # Tauri dev window; sign in with server http://localhost:8787
 ```
 
-## Adding a migration
+Linux needs the system packages listed in `docs/DESKTOP.md`.
 
-Create `worker/migrations/000N_name.sql`. Never edit an applied migration. Apply locally with the command above; tests apply all migrations automatically.
+## Tests
+
+```sh
+cd api
+cargo test --lib                                     # 26 unit tests, native
+npm run serve:test                                   # terminal 1: test Worker on :8788 (release build, test hooks)
+npm run test:http                                    # terminal 2: 43 HTTP tests
+cd ../desktop/src-tauri && cargo test                # desktop unit tests
+node e2e/journey.cjs /tmp/shots                      # browser journey against :8787
+```
+
+## Migrations
+
+Add `api/migrations/000N_name.sql`. Never edit an applied migration.

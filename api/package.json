@@ -1,0 +1,11 @@
+{
+  "name": "@cognis/api",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev -c wrangler.dev.jsonc",
+    "test:unit": "cargo test --lib",
+    "test:http": "node --test --test-concurrency=1 test/*.test.mjs",
+    "serve:test": "wrangler d1 migrations apply cognis-test --local -c wrangler.test.jsonc --persist-to .wrangler/test && wrangler dev -c wrangler.test.jsonc --port 8788 --persist-to .wrangler/test",
+    "deploy": "wrangler deploy"
+  }
+}

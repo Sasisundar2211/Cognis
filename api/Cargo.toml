@@ -1,0 +1,42 @@
+[package]
+name = "cognis-api"
+version = "0.2.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Test-only hooks (email capture endpoint). Never enabled in production builds.
+test-hooks = []
+
+[dependencies]
+worker = { version = "0.9.0", features = ["d1"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+url = "2.5.9"
+unicode-normalization = "0.1.26"
+sha2 = "0.11.1"
+scrypt = { version = "0.12.0", default-features = false }
+subtle = "2.6.1"
+base64 = "0.23.1"
+lol_html = "3.0.3"
+futures-util = { version = "0.3.34", default-features = false }
+console_error_panic_hook = "0.1.7"
+serde_bytes = "0.11.19"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "0.4.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+
+[dev-dependencies]
+futures = { version = "0.3.31", default-features = false, features = ["executor"] }

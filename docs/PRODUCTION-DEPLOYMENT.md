@@ -1,52 +1,52 @@
 # Production deployment (Cloudflare)
 
-Not yet deployed. These are the exact steps. Run them from a machine that can reach `api.cloudflare.com`.
+Not yet deployed. Run these steps from a machine that can reach `api.cloudflare.com`.
 
-## Before the first deploy, decide
+## Decide first
 
-1. Workers plan. Free plan CPU limit is 10 ms per request. Password hashing measured about 60 ms. Expect sign-up and sign-in failures (error 1102) on Free. Workers Paid is $5/month and raises the limit to 30 s.
-2. Email. Without a domain, set `EMAIL_MODE=disabled`: accounts work without email verification and password reset is unavailable. With a domain (about $10/year at Cloudflare Registrar), verify it in Resend (free tier: 3,000 emails/month, 100/day) and set `EMAIL_MODE=resend`.
+1. Workers Paid ($5/month). Required: password hashing uses about 250 ms CPU per sign-in; the Free plan allows 10 ms.
+2. Email. Without a domain, keep `EMAIL_MODE=disabled` (no verification, no password reset). With a domain (about $10/year), verify it in Resend (free: 3,000 emails/month) and set `EMAIL_MODE=resend`.
 
 ## Steps
 
 ```sh
-npx wrangler login                                   # opens a browser, sign in with the owner account
-cd worker
-npx wrangler d1 create cognis                        # copy the database_id into wrangler.jsonc
+rustup target add wasm32-unknown-unknown
+cargo install worker-build@0.9.0
+npm install && npm run build -w web
+cd api
+npx wrangler login
+npx wrangler d1 create cognis                  # paste database_id into api/wrangler.jsonc
 npx wrangler d1 migrations apply cognis --remote
-npx wrangler secret put BETTER_AUTH_SECRET           # paste output of: openssl rand -hex 32
-npx wrangler secret put BETTER_AUTH_URL              # https://cognis.<your-subdomain>.workers.dev
-# Only with a domain:
+npx wrangler secret put APP_URL                # https://cognis.<your-subdomain>.workers.dev
+# with a domain only:
 #   npx wrangler secret put RESEND_API_KEY
-#   npx wrangler secret put EMAIL_FROM               # "Cognis <hello@yourdomain.com>"
-#   and set EMAIL_MODE to "resend" in wrangler.jsonc vars
-cd .. && npm run build -w web && cd worker
+#   npx wrangler secret put EMAIL_FROM         # Cognis <hello@yourdomain.com>
+#   set "EMAIL_MODE": "resend" in api/wrangler.jsonc
 npx wrangler deploy
 ```
 
-## Verify (smoke test)
+## Smoke test
 
 ```sh
-curl -s https://<url>/api/v1/health      # {"status":"ok"}
-curl -s https://<url>/api/v1/ready       # database ok, embeddings configured
-COGNIS_URL=https://<url> node ../e2e/journey.cjs /tmp/prod-check
+curl -s https://<url>/api/v1/health     # {"status":"ok"}
+curl -s https://<url>/api/v1/ready      # database ok, embeddings configured, answers configured
+COGNIS_URL=https://<url> node e2e/journey.cjs /tmp/prod-check
 ```
 
-The journey script expects `EMAIL_MODE=disabled` (it signs in right after sign-up). It creates and then deletes one test account.
+The journey creates and deletes one account and expects `EMAIL_MODE=disabled`.
 
-## Staging
+Then sign in with the desktop companion using `https://<url>` and ask a question. This is the first run of the real answer path.
 
-Add an `env.staging` block to `wrangler.jsonc` with its own D1 database, then `npx wrangler deploy --env staging`. Deploy to staging first, run the journey, then deploy production.
-
-## Rollback
+## Desktop installers
 
 ```sh
-npx wrangler deployments list
-npx wrangler rollback <deployment-id>
+cd desktop && npm run build     # on each OS: .deb/.AppImage on Linux, .msi/.exe on Windows, .dmg/.app on macOS
 ```
 
-Rollback restores code, not data. Migrations are additive; never ship a destructive migration in the same release as code that depends on it.
+Tauri cannot cross-compile installers; build on each OS, or use a GitHub Actions matrix (`tauri-apps/tauri-action`).
 
-## CI
+## Staging, rollback, CI
 
-Not set up. Recommended: GitHub Actions running `npm ci && npm run typecheck && npm test -w worker` on every push, and `wrangler deploy` on main with a `CLOUDFLARE_API_TOKEN` repository secret (scopes: Workers Scripts Edit, D1 Edit, Workers AI Read).
+- Staging: add `env.staging` to `api/wrangler.jsonc` with its own D1, deploy with `--env staging`, run the journey, then deploy production.
+- Rollback: `npx wrangler deployments list` then `npx wrangler rollback <id>`. Code only; migrations must stay additive.
+- CI (not set up): on push run `cargo test --lib`, build the test Worker, run the HTTP suite, `npm run build -w web`. Deploy on main with a `CLOUDFLARE_API_TOKEN` secret.

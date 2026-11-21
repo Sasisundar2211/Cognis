@@ -3,11 +3,13 @@
 ## Health
 
 - `GET /api/v1/health`: process up.
-- `GET /api/v1/ready`: database reachable, embeddings configured. Returns 503 when D1 fails.
+- `GET /api/v1/ready`: database reachable, embeddings and answers configured. Returns 503 when D1 fails.
+
+Run every `wrangler` command below from `api/`.
 
 ## Logs
 
-Workers Logs is enabled (`observability.enabled`). Every API request logs one JSON line: `requestId`, method, route pattern, status, latency in ms. Searches also log mode, degraded flag, hit count and latency. Logs never contain request bodies, queries, emails or item content.
+Workers Logs is enabled (`observability.enabled`). Every API request logs one JSON line: `requestId`, method, coarse route (no ids), status, latency in ms. Searches also log mode, degraded flag, hit count and latency. Questions and answers are never logged. Logs never contain request bodies, queries, emails or item content.
 
 ```sh
 npx wrangler tail cognis --format json
@@ -20,7 +22,8 @@ Every error response includes `requestId`. Ask users for it, then search logs fo
 | Signal | Where | Action |
 |---|---|---|
 | Error 1102 (CPU exceeded) | Workers dashboard | Move to Workers Paid |
-| `degraded: true` in search logs | logs | Workers AI unavailable or daily free allocation used up |
+| `degraded: true` in search logs, or `/ready` answers unavailable | logs | Workers AI unavailable or daily free allocation used up |
+| Device tokens | `SELECT kind, COUNT(*) FROM sessions GROUP BY kind` | Unusual growth may signal token abuse; users can revoke in Account |
 | Many items with `status = failed` | `SELECT error_code, COUNT(*) FROM knowledge_items WHERE status='failed' GROUP BY 1` | Check for a site blocking the fetcher, or a parser regression |
 | 429 rate | logs | Abuse, or limits too tight |
 

@@ -1,47 +1,50 @@
 # Implementation Status
 
-Last updated: 2026-11-20. Branch: `claude/repository-audit-ww81s4`.
+Last updated: 2026-11-21. Branch: `claude/repository-audit-ww81s4`.
 
-## Phase 0 audit result
+## What changed in this checkpoint
 
-The GitHub repository `Sasisundar2211/Cognis` was empty (no commits, branches or PRs). The earlier work described in the master prompt (local `D:\cognis`, checkpoint `10591e2`, 265 tests, SP1 retrieval core in Python, SP2-S1 Chrome extension) was not pushed and was not reachable from the build environment. This codebase is a fresh build on Cloudflare, chosen by the owner. It reimplements the SP1 retrieval design (FTS5 BM25 + bge-small embeddings + RRF k=60 + lexical fallback) in TypeScript. If the original `D:\cognis` code is pushed later, its evaluation dataset should be ported to `worker/evaluation/` to compare both.
+- The API is now Rust on Cloudflare Workers (`api/`). The TypeScript API (`worker/`) is superseded and kept for reference.
+- New Grok-style workflow: a desktop companion (`desktop/`, Rust + Tauri) summoned by a global hotkey, and an `/api/v1/ask` endpoint that answers from your library with citations.
+- The web app now uses the Rust auth endpoints and shows signed-in devices.
 
-## Status legend
+## Phase 0 note
 
-- Done: implemented and verified by automated tests and a browser run.
-- Partial: implemented, with a stated gap.
-- Not started.
-- Blocked: needs an external account, credential or decision.
+The GitHub repository was empty at the start. The earlier local work (`D:\cognis`, checkpoint `10591e2`) was never pushed and is not part of this codebase.
 
 ## Modules
 
 | Module | Status | Evidence / gap |
 |---|---|---|
-| A. Auth: register, login, logout, sessions | Done | Better Auth 1.7 on D1. `test/auth.test.ts`, browser journey |
-| A. Email verification, password reset | Done in code, Blocked in production | Flows tested end to end with captured email. Production sending needs a verified sender domain (see Blockers) |
-| A. Account deletion, session revocation, rate limits, audit events | Done | Cascade deletion verified across all tables and the FTS index |
-| B. Knowledge CRUD, tags, collections, archive, provenance | Done | `test/items.test.ts`, `test/tenant.test.ts`, browser journey |
-| B. Document upload | Not started | Needs R2 storage and a PDF text extractor |
-| C. Ingestion: URL + text, validate, sanitize, normalize, extract, dedupe, store, index | Done | SSRF tests for 29 URL forms, redirect re-validation, size caps, content-type allowlist |
-| C. Background queue | Partial | URL fetch runs in `waitUntil` after the response. No durable queue yet; abandoned items are reclaimable after 5 minutes via retry |
-| D. Lexical, semantic, hybrid retrieval, RRF, filters, pagination, explanations, fallback | Done | `test/search.test.ts`. Semantic in tests uses a hashing test double, not the real model |
-| D. Retrieval evaluation harness | Not started | SP1 dataset not available. Next slice |
-| E. WorkContext / F. TaskContext / G. Context retrieval / H. Relevance gate | Not started | Depends on extension; security gate applies |
-| I. Chrome extension | Not started | Original SP2-S1 code not available. Must pass independent security review before production |
-| J. Web app: landing, auth screens, onboarding, library, search, item detail, collections, account, privacy, help, pricing | Done | Browser journey at desktop and phone widths, light and dark |
-| J. Context suggestions screen, integration settings, activity screen | Not started | Depends on modules E to H |
-| Integrations (Reddit, GitHub, YouTube, bookmarks, others) | Not started | Platform labels are detected from URLs only |
-| Billing for paid plans | Not started | Plan limits enforced server-side. No payment provider connected |
+| Accounts: sign-up, sign-in, sign-out, sessions | Done | HTTP suite `auth.test.mjs`, browser journey |
+| Email verification, password reset | Done in code, Blocked in production | Tested end to end with captured email. Production sending needs a verified sender domain |
+| Device tokens for the desktop companion | Done | Bearer auth, listed in Account, revocable, tested |
+| Change password, revoke sessions, delete account | Done | Cascade deletion tested |
+| Knowledge CRUD, tags, collections, archive, provenance | Done | `items.test.mjs`, `tenant.test.mjs`, browser journey |
+| Link import: SSRF checks, safe fetch, extraction, dedupe, retry | Done | 30 URL safety cases and fetch logic as Rust unit tests; live import tested in HTTP suite |
+| Hybrid search: BM25 + embeddings + RRF k=60, filters, pagination, explanations, fallback | Done | `search.test.mjs` with a test embedder; real model untested locally |
+| Ask (Grok-style): retrieve, answer with citations, stream progress | Partial | Sources-only path tested over HTTP and in the desktop app. The written-answer path with Workers AI is implemented but untested, because Workers AI is not reachable from this environment |
+| Desktop companion: tray, global hotkey, floating window, ask, clipboard share, save, keychain token | Done on Linux | Ran under a virtual display: sign-in, ask, Esc hide, hotkey summon. Not run on macOS or Windows |
+| Web app | Done | Browser journey 14 of 14 against the Rust API |
+| Document upload | Not started | |
+| TaskContext, relevance gate, proactive suggestions | Not started | |
+| Reading selected text from other apps | Not started | Needs OS accessibility permissions; opt-in design required |
+| Platform integrations | Not started | |
+| Billing | Not started | Plan limits enforced server-side |
+| Retrieval evaluation harness | Not started | |
 | Production deployment | Blocked | See Blockers |
 
 ## Test results (actual, this commit)
 
-- Worker: 75 tests, 5 files, all passing (`npm test -w worker`). Runs inside the real Workers runtime (workerd) with a real local D1 database.
-- Browser journey (`e2e/journey.cjs`): 14 steps passing against `wrangler dev`.
-- Typecheck: worker and web pass with `strict` and `noUncheckedIndexedAccess`.
+- Rust API unit tests: 26 passed (`cargo test --lib` in `api/`).
+- Rust API HTTP suite: 43 passed against the release Worker build in workerd with a local D1 (`npm --prefix api run test:http`).
+- Desktop Rust tests: 2 passed (`cargo test` in `desktop/src-tauri`).
+- Browser journey against the Rust API: 14 of 14 steps passed.
+- Desktop app run under Xvfb: window shown, sign-in succeeded, ask streamed status and sources, Esc hid the window, the global hotkey showed it again.
 
 ## Blockers needing the owner
 
-1. Cloudflare account access. Deployment needs a Cloudflare API token, and this build environment's network blocks `api.cloudflare.com`. Run the deploy steps in `docs/PRODUCTION-DEPLOYMENT.md` from your machine, or allow the host and provide a token.
-2. Free-plan CPU limit. Password hashing (scrypt, about 60 ms CPU measured) exceeds the Workers Free plan's 10 ms per request. Sign-up and sign-in can fail with error 1102 on the Free plan. Options: Workers Paid ($5/month), or add OAuth sign-in (GitHub, Google), which needs no password hashing.
-3. Email sending. Sending verification and reset emails to users requires a domain you control (about $10/year). Until then, production runs with `EMAIL_MODE=disabled`: no verification, and password reset is unavailable.
+1. Cloudflare access. Deploying needs a Cloudflare account login or API token, and this environment's network blocks `api.cloudflare.com`. Run the steps in `docs/PRODUCTION-DEPLOYMENT.md` from your machine.
+2. Workers Paid plan ($5/month). Password hashing costs about 250 ms of CPU in WebAssembly (measured about 0.3 s per sign-up request locally). The Free plan allows 10 ms. Sign-in will fail on Free.
+3. A domain (about $10/year) for verification and reset emails. Without it, production runs with email disabled.
+4. Code signing for desktop installers (optional): Apple Developer Program $99/year; Windows certificates vary. Unsigned installers work but show OS warnings.

@@ -1,17 +1,17 @@
 # Known limitations
 
 1. Not deployed. No production URL exists yet.
-2. Free-plan CPU. Password hashing costs about 60 ms CPU. The Workers Free plan allows 10 ms. Sign-up and sign-in may fail on Free.
-3. No email in production until a domain is set up. Without it, there is no email verification and no password reset.
-4. Semantic search scans the newest 2,000 items per user. Older items are still found by word search.
-5. Semantic similarity floor (0.45) is a starting value, not calibrated on real data.
-6. No retrieval evaluation harness yet. Search quality is unmeasured with the real model.
-7. URL import fetches pages server-side. Sites that require login (Instagram, LinkedIn, X posts) usually return a login wall or block the fetcher. Those items fail with a clear reason, or save with little text. The extension is the planned path for those sites.
-8. No document upload (PDF, DOCX).
-9. No browser extension, WorkContext, TaskContext, or context suggestions.
-10. No platform integrations. Platform labels come from the URL hostname.
-11. No billing. Every account is on the Free plan.
-12. No durable job queue. URL processing runs after the response; if the Worker is evicted mid-fetch, the item stays in processing until a retry reclaims it after 5 minutes.
-13. Export is a single JSON response. Very large libraries (tens of thousands of items) may hit response limits.
-14. Audit events have no retention job.
-15. No CI pipeline yet.
+2. Workers Paid is required for sign-in: scrypt in WebAssembly costs about 250 ms CPU; the Free plan allows 10 ms.
+3. No email in production until a domain is set up. No verification and no password reset until then.
+4. The written-answer path of `/ask` has not run against the real model. Answer quality and citation accuracy are unmeasured.
+5. Semantic search scans the newest 2,000 items per user. Older items are still found by words.
+6. The semantic similarity floor (0.45) is not calibrated.
+7. No retrieval evaluation harness yet.
+8. Link import fetches pages server-side. Instagram, LinkedIn and X posts usually return a login wall. Copy the text and save it from the companion instead.
+9. The desktop companion does not read selected text or the active app automatically. It uses the clipboard, with a preview, on explicit request.
+10. Global hotkeys may not register on some Linux Wayland compositors.
+11. Desktop installers are unsigned and show OS warnings.
+12. If the OS keychain is unavailable, the companion forgets its sign-in when it quits.
+13. No document upload, integrations, billing, proactive suggestions or durable job queue.
+14. Answers count against a daily limit per plan (Free: 30). Workers AI's free daily allocation is 10,000 neurons shared by all users; how many answers that covers has not been measured.
+15. The TypeScript `worker/` folder is superseded and not maintained.

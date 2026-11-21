@@ -2,13 +2,13 @@
 
 ## User plans (proposed, not on sale)
 
-| Plan | Price | Items | Link imports/day | Collections | Planned extras |
-|---|---|---|---|---|---|
-| Free | $0 | 500 | 50 | 10 | Search by words and meaning, export, deletion |
-| Plus | $3/month | 10,000 | 500 | 200 | Browser extension, context suggestions |
-| Pro | $8/month | 50,000 | 2,000 | 1,000 | Platform imports, priority processing |
+| Plan | Price | Items | Link imports/day | Collections | Answers/day | Planned extras |
+|---|---|---|---|---|---|---|
+| Free | $0 | 500 | 50 | 10 | 30 | Desktop companion, search by words and meaning, export, deletion |
+| Plus | $3/month | 10,000 | 500 | 200 | 200 | Context suggestions |
+| Pro | $8/month | 50,000 | 2,000 | 1,000 | 1,000 | Platform imports, priority processing |
 
-Limits are enforced in `worker/src/lib/plans.ts`. Plus and Pro extras are not built yet and are labeled as planned on the pricing page.
+Limits are enforced in `api/src/plans.rs`. Plus and Pro extras are not built yet and are labeled as planned on the pricing page.
 
 Payment provider: not connected. Polar (polar.sh) fits the open-source preference: open-source platform, merchant of record (handles sales tax), no monthly fee, about 4% + $0.40 per transaction. Stripe is the alternative. Connecting either needs an account in the owner's name.
 
@@ -26,4 +26,4 @@ Payment provider: not connected. Polar (polar.sh) fits the open-source preferenc
 
 Check current limits on Cloudflare's pricing pages before launch; they change.
 
-Realistic minimum for a working launch: $5/month (Workers Paid, needed for password hashing CPU) plus about $10/year (domain, needed for email). Everything else fits free tiers at early scale.
+Realistic minimum for a working launch: $5/month (Workers Paid, required because password hashing needs about 250 ms CPU) plus about $10/year (domain, needed for email). Workers AI usage for answers is billed per neuron above the free daily allocation; measure it after launch before setting paid-plan answer limits. Optional: Apple Developer Program ($99/year) to sign the macOS companion.

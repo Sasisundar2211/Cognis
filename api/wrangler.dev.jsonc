@@ -1,0 +1,14 @@
+{
+  // Local development. No Workers AI locally (remote-only): search runs lexical and /ask returns sources only.
+  "name": "cognis-dev",
+  "main": "build/worker/shim.mjs",
+  "compatibility_date": "2026-11-01",
+  "build": { "command": "worker-build --release" },
+  "assets": { "directory": "../web/dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "cognis-dev", "database_id": "local-dev", "migrations_dir": "migrations" }],
+  "ratelimits": [
+    { "name": "API_LIMITER", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } },
+    { "name": "INGEST_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }
+  ],
+  "vars": { "APP_ENV": "development", "EMAIL_MODE": "disabled", "EMBEDDER": "none", "APP_URL": "http://localhost:8787" }
+}

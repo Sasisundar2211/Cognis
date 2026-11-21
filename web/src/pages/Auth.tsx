@@ -55,7 +55,8 @@ export function SignIn() {
       }
     >
       <form onSubmit={submit} className="grid gap-4" noValidate>
-        {params.get("verified") && <Notice tone="success">Email verified. Sign in to continue.</Notice>}
+        {params.get("error") === "invalid_token" && <Notice tone="error">That link has expired or was already used. Sign in, or sign up again to get a new link.</Notice>}
+        {params.get("reset") && <Notice tone="success">Password changed. Sign in with your new password.</Notice>}
         {error && <Notice tone="error">{error}</Notice>}
         <Field label="Email" htmlFor="email">
           <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -93,11 +94,11 @@ export function SignUp() {
     if (Object.keys(fe).length) return;
     setBusy(true);
     setError("");
-    const { data, error } = await authClient.signUp.email({ name: name.trim() || email.split("@")[0]!, email, password, callbackURL: "/app/welcome" });
+    const { data, error } = await authClient.signUp.email({ name: name.trim(), email, password });
     setBusy(false);
     if (error) return setError(authErrorMessage(error));
-    if (data?.token) nav("/app/welcome", { replace: true });
-    else setSentTo(email);
+    if (data?.verificationRequired) setSentTo(email);
+    else nav("/app/welcome", { replace: true });
   }
 
   if (sentTo) {
@@ -151,7 +152,7 @@ function ResendVerification({ email }: { email: string }) {
         disabled={state === "sent"}
         onClick={async () => {
           setState("busy");
-          const { error } = await authClient.sendVerificationEmail({ email, callbackURL: "/app/welcome" });
+          const { error } = await authClient.sendVerificationEmail({ email });
           setState(error ? "error" : "sent");
         }}
       >
@@ -177,9 +178,9 @@ export function ForgotPassword() {
           onSubmit={async (e) => {
             e.preventDefault();
             setBusy(true);
-            const { error } = await authClient.requestPasswordReset({ email, redirectTo: "/reset-password" });
+            const { error } = await authClient.requestPasswordReset({ email });
             setBusy(false);
-            if (error && error.status === 429) return setError(authErrorMessage(error));
+            if (error && (error.status === 429 || error.status === 503)) return setError(authErrorMessage(error));
             setDone(true); // same message whether or not the account exists
           }}
         >
