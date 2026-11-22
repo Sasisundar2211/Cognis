@@ -22,6 +22,8 @@ npx wrangler secret put APP_URL                # https://cognis.<your-subdomain>
 #   npx wrangler secret put RESEND_API_KEY
 #   npx wrangler secret put EMAIL_FROM         # Cognis <hello@yourdomain.com>
 #   set "EMAIL_MODE": "resend" in api/wrangler.jsonc
+# for Instagram posts and reels (optional, free Meta developer app with oEmbed Read):
+#   npx wrangler secret put INSTAGRAM_OEMBED_TOKEN   # app id|client token
 npx wrangler deploy
 ```
 
@@ -36,6 +38,8 @@ COGNIS_URL=https://<url> node e2e/journey.cjs /tmp/prod-check
 The journey creates and deletes one account and expects `EMAIL_MODE=disabled`.
 
 Then sign in with the desktop companion using `https://<url>` and ask a question. This is the first run of the real answer path.
+
+Also paste one saved link per platform (Reddit post, X post, YouTube video, TikTok, Instagram reel, GitHub repo) and confirm each reaches "ready". This is the first live test of the platform extractors. The cron trigger (`*/5 * * * *`) processes anything still pending.
 
 ## Desktop installers
 

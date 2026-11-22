@@ -3,6 +3,7 @@
   "name": "cognis-test",
   "main": "build-test/worker/shim.mjs",
   "compatibility_date": "2026-11-01",
+  "triggers": { "crons": ["*/5 * * * *"] },
   "build": { "command": "worker-build --release -d build-test --features test-hooks" },
   "assets": { "directory": "../web/dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
   "d1_databases": [{ "binding": "DB", "database_name": "cognis-test", "database_id": "local-test", "migrations_dir": "migrations" }],

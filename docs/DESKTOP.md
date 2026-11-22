@@ -1,6 +1,9 @@
 # Desktop companion
 
-The Cognis desktop companion stays with you on your desktop, the way Grok's desktop app does. It runs in the system tray. Press the hotkey from any app and a small always-on-top window appears. Ask a question and Cognis answers from what you saved, with numbered sources. Press Esc or the hotkey again and it goes away.
+The Cognis desktop companion works beside you, the way Grok's desktop app does. It runs in the system tray.
+
+- Ask: press Ctrl + Shift + Space (macOS: Cmd + Shift + Space) from any app. A floating window appears over your work. Ask, and Cognis answers from what you saved, with numbered sources. Esc hides it.
+- Observe: turn on "Observe my work". Cognis watches which app and window title is in front of you. When your work changes and a saved item clearly fits it, a slim panel slides in at the right edge of the screen. It does not take focus, and it hides itself after 25 seconds unless you hover it.
 
 Built with Tauri 2 (Rust core, system web view). Windows, macOS and Linux.
 
@@ -8,55 +11,68 @@ Built with Tauri 2 (Rust core, system web view). Windows, macOS and Linux.
 
 | You do | Cognis does |
 |---|---|
-| Press Ctrl + Shift + Space (macOS: Cmd + Shift + Space) | Shows the window over your current app and focuses the input |
-| Type a question, press Enter | Searches your library, then streams an answer with [n] citations |
-| Click a citation or source | Opens the original link in your browser |
-| Turn on "Include clipboard" | Shows the clipboard text it will send, then sends it with that one question |
-| Click "Save clipboard" | Shows the text, saves it after you confirm |
-| Type `/save some text` or `/save https://...` | Saves a note or a link |
-| Ask a follow-up | Keeps the last 6 turns as conversation context |
-| Press New | Clears the conversation |
-| Press Esc | Hides the window. The app keeps running in the tray |
-| Tray menu, Pause hotkey | Unregisters the hotkey until you resume |
+| Turn on Observe (window checkbox or tray menu) | Shows "Working on: ..." so you can see what it understood |
+| Work in another app for a few seconds | Reads that window's app name and title, finds related saved items, and decides: stay silent, keep a quiet hint, or show the panel |
+| Click a card in the panel | Opens the original post or page |
+| Click Useful / Not useful / ✕ | Records feedback; dismissed items are not suggested again for 7 days |
+| Click "Ask about this", or press the hotkey | Opens the companion with your current work as context. "What did I save about this?" searches the work itself |
+| Type `/save` with text | Saves a note |
+| Type `/save` with one or many links | Imports the posts, reels or pages |
+| Esc | Hides the window; the app keeps running in the tray |
 
-## What it never does
+## When the panel appears
 
-- No background capture: no screenshots, keylogging, window watching, microphone or camera.
-- No clipboard reads unless you click one of the two clipboard controls, and you see the text first.
-- No direct network access from the web view. The Rust core makes every request.
-- No password storage. Signing in exchanges your password once for a device token.
+The server's relevance gate decides, from evidence only:
+
+- SILENT: the window says nothing about a task (new tab, desktop, a chat app's home), or nothing matches.
+- PASSIVE: a weak match. Not shown; available if you open the companion.
+- SUGGEST: words and meaning agree, or one signal is strong.
+- HIGH_CONFIDENCE: both agree strongly.
+
+Limits so it never becomes a notification machine: at most one panel per 90 seconds, 40 per day, the same item never twice in 30 minutes, and a window must stay in front for about 4 seconds before it counts.
+
+## What Observe reads, and what it never reads
+
+Reads: the app name and title of the window in front of you. That is all.
+
+Never reads: screen pixels, window contents, keystrokes, the clipboard, the microphone or the camera.
+
+Skipped on your device before anything is sent: password managers (1Password, Bitwarden, KeePass, LastPass, Dashlane, Keychain Access, Enpass, Proton Pass), private and incognito browser windows, lock screens, and Cognis itself. The server skips the same list again.
+
+Stored on the server: which saved items were suggested, when, and your feedback. Window titles and app names are never stored or logged.
+
+Off by default. Your choice is remembered. Turn it off any time from the window or the tray; the tray tooltip says "observing" while it is on.
 
 ## Sign-in and the device token
 
-1. Enter your server address (for example `https://cognis.<you>.workers.dev`), email and password.
-2. The server returns a device token. The companion stores it in the operating system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service).
-3. The token appears in the web app under Account, Devices, as "Desktop companion on <computer name>". Sign it out there to revoke it immediately.
-4. Signing out in the companion revokes the token on the server and deletes it from the keychain.
+1. Enter your server address, email and password once.
+2. The server returns a device token, kept in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+3. It shows in the web app under Account, Devices. Sign it out there to revoke it immediately.
 
 Only `https://` servers are accepted, except `http://localhost` for development.
 
+## Platform notes
+
+- macOS: reading other apps' window titles requires the Screen Recording permission (System Settings, Privacy and Security). Without it, titles come back empty and Observe stays silent. Cognis does not capture the screen; macOS uses that permission for titles too.
+- Linux X11: works. Apps that set only the legacy `WM_NAME` title are supported through a fallback.
+- Linux Wayland: window titles are only available on some compositors. Observe may stay silent.
+- Windows: works without extra permissions.
+
 ## Build
 
-Requirements: Rust 1.80+, Node 22+, and the Tauri system dependencies for your OS (https://v2.tauri.app/start/prerequisites/). On Debian or Ubuntu:
+Requirements: Rust 1.80+, Node 22+, and the Tauri system dependencies (https://v2.tauri.app/start/prerequisites/). On Debian or Ubuntu:
 
 ```sh
 sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev
 ```
 
-Then:
-
 ```sh
-npm install                       # from the repo root
+npm install            # repo root
 cd desktop
-npm run dev                       # development, with the local API on http://localhost:8787
-npm run build                     # installers in src-tauri/target/release/bundle/
+npm run dev            # development against http://localhost:8787
+npm run build          # installers in src-tauri/target/release/bundle/
 ```
 
-Installers are unsigned. macOS Gatekeeper and Windows SmartScreen will warn on first launch until code signing is set up (Apple Developer Program: $99/year; Windows code signing certificates vary).
+Diagnostic: `cargo run --example active` in `desktop/src-tauri` prints what Observe would read for the window in front.
 
-## Known limitations
-
-- The companion does not read the active app's name or selected text automatically. Copy the text and use "Include clipboard". Reading selections from other apps needs OS accessibility permissions; it is planned as an opt-in setting.
-- On Linux Wayland sessions, global hotkeys depend on the compositor and may not register. X11 works.
-- If the system keychain is unavailable (some minimal Linux setups), you stay signed in only until the app quits.
-- Answers need Workers AI. On local development servers, the companion shows matching sources without a written answer.
+Installers are unsigned until code signing is set up.

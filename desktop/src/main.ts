@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-type Status = { signedIn: boolean; user: { email: string } | null; server: string | null; paused: boolean; hotkey: string };
+type Status = { signedIn: boolean; user: { email: string } | null; server: string | null; paused: boolean; observing: boolean; task: { focus: string; keywords: string[] } | null; hotkey: string };
 type Item = { id: string; title: string; originalUrl: string | null; sourcePlatform: string; createdAt: string };
 type Source = { n: number; item: Item; reason: string };
 type Turn = { role: "user" | "assistant"; content: string };
@@ -18,13 +18,12 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 const errMsg = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as ApiErr).message) : "Something went wrong.");
 const hotkeyLabel = (h: string) => h.replace("CommandOrControl", navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl").replaceAll("+", " + ");
 
-const LABELS: Record<string, string> = { manual: "Note", browser: "Clipboard", web: "Web", reddit: "Reddit", github: "GitHub", youtube: "YouTube", linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium" };
+const LABELS: Record<string, string> = { manual: "Note", browser: "Desktop", web: "Web", reddit: "Reddit", github: "GitHub", youtube: "YouTube", linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium" };
 const label = (p: string) => LABELS[p] ?? p;
 
 const win = getCurrentWindow();
 let history: Turn[] = [];
 let busy = false;
-let sharedText: string | null = null;
 
 async function render() {
   const s = await invoke<Status>("status");
@@ -36,6 +35,7 @@ async function render() {
     if (s.server) $<HTMLInputElement>("server").value = s.server;
     ($<HTMLInputElement>(s.server ? "email" : "server")).focus();
   } else {
+    showWorking(s);
     $<HTMLTextAreaElement>("q").focus();
   }
 }
@@ -75,7 +75,7 @@ $("sign-out").addEventListener("click", async () => {
   resetThread();
   await render();
 });
-$("open-web").addEventListener("click", () => invoke("open_web_app").catch((e) => notice(errMsg(e), true)));
+$("open-web").addEventListener("click", () => invoke("open_web_app", { itemId: null }).catch((e) => notice(errMsg(e), true)));
 $("new-chat").addEventListener("click", () => {
   resetThread();
   $<HTMLTextAreaElement>("q").focus();
@@ -92,51 +92,29 @@ function resetThread() {
   $("empty").hidden = false;
 }
 
-// ---------- clipboard sharing (explicit only) ----------
+// ---------- observe ----------
 
-const includeClip = $<HTMLInputElement>("include-clip");
-includeClip.addEventListener("change", async () => {
-  if (!includeClip.checked) {
-    sharedText = null;
-    $("share-preview").hidden = true;
-    return;
-  }
-  const text = await invoke<string | null>("clipboard_preview");
-  if (!text) {
-    includeClip.checked = false;
-    notice("Your clipboard has no text to share.", true);
-    return;
-  }
-  sharedText = text;
-  $("share-text").textContent = text;
-  $("share-preview").hidden = false;
+const observeBox = $<HTMLInputElement>("observe");
+observeBox.addEventListener("change", async () => {
+  const st = await invoke<Status>("set_observe", { on: observeBox.checked });
+  showWorking(st);
 });
 
-let pendingSave: string | null = null;
-$("save-clip").addEventListener("click", async () => {
-  const text = await invoke<string | null>("clipboard_preview");
-  if (!text) return notice("Your clipboard has no text to save.", true);
-  pendingSave = text;
-  $("save-text").textContent = text;
-  $("save-preview").hidden = false;
-  $<HTMLButtonElement>("save-confirm").focus();
-});
-$("save-cancel").addEventListener("click", () => {
-  pendingSave = null;
-  $("save-preview").hidden = true;
-});
-$("save-confirm").addEventListener("click", async () => {
-  if (!pendingSave) return;
-  const text = pendingSave;
-  pendingSave = null;
-  $("save-preview").hidden = true;
-  try {
-    const r = await invoke<{ item: Item; duplicate: boolean }>("save_text", { text, title: null });
-    notice(r.duplicate ? "Already in your library." : `Saved "${r.item.title || "clipboard text"}".`);
-  } catch (e) {
-    notice(errMsg(e), true);
+function showWorking(s: Status) {
+  observeBox.checked = s.observing;
+  const w = $("working");
+  if (s.observing && s.task?.focus) {
+    w.textContent = `Working on: ${s.task.focus}`;
+    w.hidden = false;
+  } else if (s.observing) {
+    w.textContent = "Watching the window in front";
+    w.hidden = false;
+  } else {
+    w.hidden = true;
   }
-});
+}
+
+void listen<{ state: string; task: { focus: string } | null }>("context", async () => showWorking(await invoke<Status>("status")));
 
 // ---------- asking ----------
 
@@ -155,8 +133,9 @@ $("composer").addEventListener("submit", async (e) => {
   if (text.startsWith("/save ")) {
     q.value = "";
     try {
-      const r = await invoke<{ item: Item; duplicate: boolean }>("save_text", { text: text.slice(6), title: null });
-      notice(r.duplicate ? "Already in your library." : `Saved "${r.item.title}".`);
+      const r = await invoke<{ item?: Item; duplicate?: boolean; queued?: number }>("save_text", { text: text.slice(6) });
+      if (r.queued !== undefined) notice(`Importing ${r.queued} link${r.queued === 1 ? "" : "s"}. They appear in your library as they finish.`);
+      else notice(r.duplicate ? "Already in your library." : `Saved "${r.item?.title || "your note"}".`);
     } catch (err) {
       notice(errMsg(err), true);
     }
@@ -195,7 +174,7 @@ function renderAnswer() {
 
 function openSource(s: Source) {
   if (s.item.originalUrl) void invoke("open_link", { url: s.item.originalUrl }).catch((e) => notice(errMsg(e), true));
-  else void invoke("open_web_app").catch(() => undefined);
+  else void invoke("open_web_app", { itemId: s.item.id }).catch(() => undefined);
 }
 
 function renderSources(list: Source[]) {
@@ -230,9 +209,8 @@ async function askQuestion(question: string) {
   step("Searching your library", true);
   thread.scrollTop = thread.scrollHeight;
 
-  const shared = includeClip.checked ? sharedText : null;
   try {
-    await invoke("ask", { args: { question, sharedText: shared, history } });
+    await invoke("ask", { args: { question, history, useContext: true } });
   } catch (e) {
     step("Stopped", false);
     answer.textContent = errMsg(e);
@@ -243,9 +221,6 @@ async function askQuestion(question: string) {
     current = null;
     busy = false;
     $<HTMLButtonElement>("ask-btn").disabled = false;
-    includeClip.checked = false;
-    sharedText = null;
-    $("share-preview").hidden = true;
     q.focus();
   }
 }

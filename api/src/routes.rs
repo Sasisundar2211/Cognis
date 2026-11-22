@@ -7,6 +7,7 @@ use worker::{Context, D1Database, Env, Request, Response};
 use crate::args;
 use crate::ask::{self, AskRequest, Source};
 use crate::audit::audit;
+use crate::context;
 use crate::auth::{self, Caller};
 use crate::db::{self, Arg, Count};
 use crate::error::{ApiError, ApiResult};
@@ -131,16 +132,111 @@ async fn create_item(mut req: Request, env: &Env, ctx: &Context, db: &D1Database
             ctx.wait_until(async move {
                 if let Ok(db2) = env2.d1("DB") {
                     let emb2 = retrieval::embedder(&env2, &cfg2);
-                    let _ = kn::process(&db2, emb2.as_ref(), &WorkerFetcher, &uid, &iid).await;
+                    let _ = kn::process(&db2, emb2.as_ref(), &WorkerFetcher, cfg2.instagram_token.as_deref(), &uid, &iid).await;
                 }
             });
         } else {
-            row = kn::process(db, emb.as_ref(), &WorkerFetcher, &c.user.id, &row.id).await?;
+            row = kn::process(db, emb.as_ref(), &WorkerFetcher, cfg.instagram_token.as_deref(), &c.user.id, &row.id).await?;
         }
         audit(db, Some(&c.user.id), "item.created", json!({ "kind": row.kind })).await?;
     }
     let item = kn::public_item(db, &c.user.id, &row).await?;
     http::json_response(&json!({ "item": item, "duplicate": created.duplicate }), if created.duplicate { 200 } else { 201 })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BatchBody {
+    urls: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// Bulk import: paste up to 50 saved-post or reel links at once. Each link becomes a pending item;
+/// the first few are processed right away and the scheduled job works through the rest.
+async fn batch_items(mut req: Request, env: &Env, ctx: &Context, db: &D1Database, cfg: &Config, c: &Caller) -> ApiResult<Response> {
+    rate_limit(env, "INGEST_LIMITER", &c.user.id).await?;
+    let b: BatchBody = http::json_body(&mut req).await?;
+    if b.urls.is_empty() || b.urls.len() > 50 {
+        return Err(ApiError::validation("urls", "send 1 to 50 links"));
+    }
+    if b.tags.len() > 20 || b.tags.iter().any(|t| t.is_empty() || t.chars().count() > 64) {
+        return Err(ApiError::validation("tags", "up to 20 tags, each 1 to 64 characters"));
+    }
+    let mut results: Vec<Value> = vec![];
+    let mut to_process: Vec<String> = vec![];
+    let mut seen: Vec<String> = vec![];
+    for raw in b.urls {
+        let url = raw.trim().to_string();
+        if url.is_empty() || seen.contains(&url) {
+            continue;
+        }
+        seen.push(url.clone());
+        if url.chars().count() > 2048 {
+            results.push(json!({ "url": url.chars().take(80).collect::<String>(), "error": { "code": "invalid_url", "message": "Link is too long." } }));
+            continue;
+        }
+        match kn::create(db, &c.user, CreateInput::Url { url: url.clone(), title: None, note: None, tags: b.tags.clone() }).await {
+            Ok(cr) => {
+                if cr.needs_processing {
+                    to_process.push(cr.row.id.clone());
+                }
+                results.push(json!({ "url": url, "itemId": cr.row.id, "duplicate": cr.duplicate, "status": cr.row.status }));
+            }
+            Err(e) if e.status == 500 => return Err(e),
+            Err(e) => {
+                let stop = e.code == "plan_limit_items" || e.code == "plan_limit_url_daily";
+                results.push(json!({ "url": url, "error": { "code": e.code, "message": e.message } }));
+                if stop {
+                    break;
+                }
+            }
+        }
+    }
+    let queued = to_process.len();
+    if queued > 0 {
+        audit(db, Some(&c.user.id), "item.batch_created", json!({ "count": queued })).await?;
+        let first: Vec<String> = to_process.into_iter().take(5).collect();
+        let (env2, cfg2, uid) = (env.clone(), cfg.clone(), c.user.id.clone());
+        ctx.wait_until(async move {
+            if let Ok(db2) = env2.d1("DB") {
+                let emb = retrieval::embedder(&env2, &cfg2);
+                for id in first {
+                    let _ = kn::process(&db2, emb.as_ref(), &WorkerFetcher, cfg2.instagram_token.as_deref(), &uid, &id).await;
+                }
+            }
+        });
+    }
+    http::json_response(&json!({ "results": results, "queued": queued }), 202)
+}
+
+/// Scheduled job: process pending links, reclaim abandoned ones, and retry transient failures.
+pub async fn process_pending(env: &Env) -> ApiResult<usize> {
+    let db = env.d1("DB").map_err(|_| ApiError::internal())?;
+    let cfg = Config::from_env(env);
+    let emb = retrieval::embedder(env, &cfg);
+    #[derive(Deserialize)]
+    struct P {
+        id: String,
+        user_id: String,
+    }
+    let stale = iso_from_ms(now_ms() - 300_000.0);
+    let retry_after = iso_from_ms(now_ms() - 600_000.0);
+    let rows: Vec<P> = db::all(
+        &db,
+        "SELECT id, user_id FROM knowledge_items WHERE kind = 'url' AND (
+           status = 'pending'
+           OR (status = 'processing' AND updated_at < ?)
+           OR (status = 'failed' AND attempts < 3 AND updated_at < ? AND (error_code IN ('fetch_timeout','fetch_failed','http_429') OR error_code LIKE 'http_5%'))
+         ) ORDER BY updated_at LIMIT 15",
+        args![stale, retry_after],
+    )
+    .await?;
+    let n = rows.len();
+    for r in rows {
+        let _ = kn::process(&db, emb.as_ref(), &WorkerFetcher, cfg.instagram_token.as_deref(), &r.user_id, &r.id).await;
+    }
+    Ok(n)
 }
 
 async fn list_items(req: &Request, db: &D1Database, c: &Caller) -> ApiResult<Response> {
@@ -209,7 +305,7 @@ async fn retry_item(env: &Env, db: &D1Database, cfg: &Config, c: &Caller, id: &s
         return Err(ApiError::new(409, "not_failed", "Only failed items can be retried."));
     }
     let emb = retrieval::embedder(env, cfg);
-    let updated = kn::process(db, emb.as_ref(), &WorkerFetcher, &c.user.id, id).await?;
+    let updated = kn::process(db, emb.as_ref(), &WorkerFetcher, cfg.instagram_token.as_deref(), &c.user.id, id).await?;
     if updated.status == "failed" && updated.attempts >= kn::MAX_ATTEMPTS {
         return Err(ApiError::new(409, "retry_exhausted", "This item failed too many times. Delete it and save the link again."));
     }
@@ -270,6 +366,10 @@ async fn ask_route(mut req: Request, env: &Env, db: &D1Database, cfg: &Config, c
     if b.history.len() > 20 {
         return Err(ApiError::validation("history", "at most 20 turns"));
     }
+    // Private windows (password managers, incognito) never reach the model, even if a client sends them.
+    if b.context.as_ref().map(|c| context::is_private(c.app_name.as_deref().unwrap_or(""), c.window_title.as_deref().unwrap_or(""))).unwrap_or(false) {
+        b.context = None;
+    }
     if let Some(ctx) = b.context.as_mut() {
         ctx.selected_text = ctx.selected_text.as_deref().map(|s| normalize_text(s, ask::MAX_CONTEXT));
         ctx.app_name = ctx.app_name.as_deref().map(|s| normalize_text(s, 80));
@@ -283,7 +383,8 @@ async fn ask_route(mut req: Request, env: &Env, db: &D1Database, cfg: &Config, c
     }
 
     let emb = retrieval::embedder(env, cfg);
-    let out = search::search(db, emb.as_ref(), &c.user.id, &ask::retrieval_query(&b), "hybrid", &Filters { status: Some("ready".into()), ..Default::default() }, ask::MAX_SOURCES, 0).await?;
+    let task_keywords = b.context.as_ref().and_then(|ctx| context::extract_task(ctx.app_name.as_deref().unwrap_or(""), ctx.window_title.as_deref().unwrap_or(""))).map(|t| t.keywords).unwrap_or_default();
+    let out = search::search(db, emb.as_ref(), &c.user.id, &ask::retrieval_query(&b, &task_keywords), "hybrid", &Filters { status: Some("ready".into()), ..Default::default() }, ask::MAX_SOURCES, 0).await?;
     let results = hydrate(db, &c.user.id, &out.hits).await?;
     let sources: Vec<Source> = results
         .iter()
@@ -352,6 +453,152 @@ fn sse_response(bytes: Vec<u8>) -> ApiResult<Response> {
     let res = Response::from_bytes(bytes)?;
     res.headers().set("Content-Type", "text/event-stream")?;
     Ok(res)
+}
+
+// ---------- context suggestions (Observe mode) ----------
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ObserveBody {
+    app_name: String,
+    window_title: String,
+}
+
+const SUGGEST_COOLDOWN_MS: f64 = 90_000.0;
+const MAX_SUGGESTIONS_PER_DAY: i64 = 40;
+
+/// Given what is in front of the user, decide whether a saved item deserves their attention.
+/// Window titles are processed in memory only and never stored or logged.
+async fn suggest_route(mut req: Request, env: &Env, db: &D1Database, cfg: &Config, c: &Caller) -> ApiResult<Response> {
+    let b: ObserveBody = http::json_body(&mut req).await?;
+    if b.app_name.chars().count() > 120 || b.window_title.chars().count() > 400 {
+        return Err(ApiError::validation("windowTitle", "too long"));
+    }
+    let app = normalize_text(&b.app_name, 120);
+    let title = normalize_text(&b.window_title, 400);
+    let Some(task) = context::extract_task(&app, &title) else {
+        return http::ok(&json!({ "state": context::State::Silent, "task": null, "suggestions": [] }));
+    };
+
+    let uid = &c.user.id;
+    let emb = retrieval::embedder(env, cfg);
+    let query = task.keywords.join(" ");
+    let out = search::search(db, emb.as_ref(), uid, &query, "hybrid", &Filters { status: Some("ready".into()), ..Default::default() }, 8, 0).await?;
+
+    // Suppress items shown in the last 30 minutes, and items the user waved off in the last 7 days.
+    #[derive(Deserialize)]
+    struct Id {
+        item_id: String,
+    }
+    let recent: Vec<Id> = db::all(
+        db,
+        "SELECT si.item_id AS item_id FROM suggestion_items si JOIN suggestion_events se ON se.id = si.suggestion_id AND se.user_id = si.user_id
+         WHERE si.user_id = ? AND (se.created_at >= ? OR (se.feedback IN ('not_useful','dismissed') AND se.feedback_at >= ?))",
+        args![uid, iso_from_ms(now_ms() - 1_800_000.0), iso_from_ms(now_ms() - 7.0 * 86_400_000.0)],
+    )
+    .await?;
+    let min_sim = emb.as_ref().map(|e| e.min_similarity()).unwrap_or(0.45);
+    // An interruption shows only items with word evidence or a clearly strong meaning match.
+    let hits: Vec<&search::Hit> = out
+        .hits
+        .iter()
+        .filter(|h| !recent.iter().any(|r| r.item_id == h.id))
+        .filter(|h| h.lexical || h.similarity.map(|s| s >= min_sim + 0.1).unwrap_or(false))
+        .take(3)
+        .collect();
+
+    let best = hits.first().map(|h| context::Evidence { lexical: h.lexical, matched_terms: crate::retrieval::rank::highlighted_terms(&h.snippet).len(), similarity: h.similarity, min_similarity: min_sim });
+    let mut state = context::gate(Some(&task), best.as_ref());
+
+    if state >= context::State::Suggest {
+        #[derive(Deserialize)]
+        struct Last {
+            created_at: String,
+            n: i64,
+        }
+        let since_day = iso_from_ms(now_ms() - 86_400_000.0);
+        let last: Option<Last> = db::first(db, "SELECT MAX(created_at) AS created_at, COUNT(*) AS n FROM suggestion_events WHERE user_id = ? AND created_at >= ?", args![uid, since_day]).await.ok().flatten().filter(|l: &Last| l.n > 0);
+        let cooling = last.as_ref().map(|l| l.created_at.as_str() >= iso_from_ms(now_ms() - SUGGEST_COOLDOWN_MS).as_str()).unwrap_or(false);
+        let capped = last.as_ref().map(|l| l.n >= MAX_SUGGESTIONS_PER_DAY).unwrap_or(false);
+        if cooling || capped {
+            // Not a notification machine: hold the suggestion back, keep it available on request.
+            state = context::State::Passive;
+        }
+    }
+
+    let hit_views: Vec<search::Hit> = hits.iter().map(|h| search::Hit { id: h.id.clone(), snippet: h.snippet.clone(), reason: h.reason.clone(), lexical: h.lexical, semantic: h.semantic, similarity: h.similarity }).collect();
+    let results = if state == context::State::Silent { vec![] } else { hydrate(db, uid, &hit_views).await? };
+    let mut suggestion_id: Option<String> = None;
+    if state >= context::State::Suggest && !results.is_empty() {
+        let sid = new_id("sug");
+        let mut stmts = vec![db::stmt(db, "INSERT INTO suggestion_events (id, user_id, state, item_count, created_at) VALUES (?, ?, ?, ?, ?)", args![&sid, uid, if state == context::State::HighConfidence { "HIGH_CONFIDENCE" } else { "SUGGEST" }, results.len() as i64, now_iso()])?];
+        for (i, h) in hit_views.iter().enumerate() {
+            stmts.push(db::stmt(db, "INSERT INTO suggestion_items (suggestion_id, user_id, item_id, position) VALUES (?, ?, ?, ?)", args![&sid, uid, &h.id, i as i64])?);
+        }
+        db::batch(db, stmts).await?;
+        suggestion_id = Some(sid);
+    }
+    let suggestions: Vec<Value> = results
+        .into_iter()
+        .map(|r| {
+            let why = format!("{}. Related to \"{}\".", r["reason"].as_str().unwrap_or("Related"), task.focus);
+            json!({ "item": r["item"], "snippet": r["snippet"], "reason": why })
+        })
+        .collect();
+    http::ok(&json!({ "state": state, "task": task, "suggestionId": suggestion_id, "suggestions": suggestions }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeedbackBody {
+    action: String,
+}
+
+async fn suggestion_feedback(mut req: Request, db: &D1Database, c: &Caller, id: &str) -> ApiResult<Response> {
+    if !valid_id(id) {
+        return Err(ApiError::not_found("Suggestion"));
+    }
+    let b: FeedbackBody = http::json_body(&mut req).await?;
+    if !["useful", "not_useful", "opened", "dismissed"].contains(&b.action.as_str()) {
+        return Err(ApiError::validation("action", "must be useful, not_useful, opened or dismissed"));
+    }
+    // "opened" never overwrites an explicit judgment.
+    let n = db::run(
+        db,
+        "UPDATE suggestion_events SET feedback = ?, feedback_at = ? WHERE id = ? AND user_id = ? AND (? != 'opened' OR feedback IS NULL)",
+        args![&b.action, now_iso(), id, &c.user.id, &b.action],
+    )
+    .await?;
+    if n == 0 {
+        let exists: Option<Count> = db::first(db, "SELECT COUNT(*) AS n FROM suggestion_events WHERE id = ? AND user_id = ?", args![id, &c.user.id]).await?;
+        if exists.map(|e| e.n).unwrap_or(0) == 0 {
+            return Err(ApiError::not_found("Suggestion"));
+        }
+    }
+    http::no_content()
+}
+
+/// Useful Intervention Rate = useful suggestions / suggestions presented (last 30 days).
+async fn suggestion_stats(db: &D1Database, c: &Caller) -> ApiResult<Response> {
+    #[derive(Deserialize)]
+    struct S {
+        presented: i64,
+        useful: i64,
+        not_useful: i64,
+        opened: i64,
+        dismissed: i64,
+    }
+    let s: S = db::first(
+        db,
+        "SELECT COUNT(*) AS presented, COALESCE(SUM(feedback = 'useful'), 0) AS useful, COALESCE(SUM(feedback = 'not_useful'), 0) AS not_useful,
+                COALESCE(SUM(feedback = 'opened'), 0) AS opened, COALESCE(SUM(feedback = 'dismissed'), 0) AS dismissed
+         FROM suggestion_events WHERE user_id = ? AND created_at >= ?",
+        args![&c.user.id, iso_from_ms(now_ms() - 30.0 * 86_400_000.0)],
+    )
+    .await?
+    .unwrap_or(S { presented: 0, useful: 0, not_useful: 0, opened: 0, dismissed: 0 });
+    let rate = if s.presented > 0 { Some(s.useful as f64 / s.presented as f64) } else { None };
+    http::ok(&json!({ "days": 30, "presented": s.presented, "useful": s.useful, "notUseful": s.not_useful, "opened": s.opened, "dismissed": s.dismissed, "usefulInterventionRate": rate }))
 }
 
 // ---------- collections ----------
@@ -556,7 +803,7 @@ pub async fn handle(req: Request, env: &Env, ctx: &Context, cfg: &Config, path: 
     if !caller.via_bearer {
         http::csrf_check(&req, cfg)?;
     }
-    if segs.first() == Some(&"api") && segs.get(1) == Some(&"v1") && !(method == "POST" && segs.get(2) == Some(&"items")) {
+    if segs.first() == Some(&"api") && segs.get(1) == Some(&"v1") && !(method == "POST" && segs.get(2) == Some(&"items") && segs.len() <= 4) {
         rate_limit(env, "API_LIMITER", &caller.user.id).await?;
     }
 
@@ -569,6 +816,7 @@ pub async fn handle(req: Request, env: &Env, ctx: &Context, cfg: &Config, path: 
         ("POST", ["api", "auth", "delete-account"]) => auth::delete_account(req, &caller, &db, cfg).await,
 
         ("POST", ["api", "v1", "items"]) => create_item(req, env, ctx, &db, cfg, &caller).await,
+        ("POST", ["api", "v1", "items", "batch"]) => batch_items(req, env, ctx, &db, cfg, &caller).await,
         ("GET", ["api", "v1", "items"]) => list_items(&req, &db, &caller).await,
         (m, ["api", "v1", "items", id, rest @ ..]) => {
             if !valid_id(id) {
@@ -591,6 +839,9 @@ pub async fn handle(req: Request, env: &Env, ctx: &Context, cfg: &Config, path: 
         }
         ("GET", ["api", "v1", "search"]) => search_route(&req, env, &db, cfg, &caller).await,
         ("POST", ["api", "v1", "ask"]) => ask_route(req, env, &db, cfg, &caller).await,
+        ("POST", ["api", "v1", "context", "suggest"]) => suggest_route(req, env, &db, cfg, &caller).await,
+        ("POST", ["api", "v1", "suggestions", id, "feedback"]) => suggestion_feedback(req, &db, &caller, id).await,
+        ("GET", ["api", "v1", "suggestions", "stats"]) => suggestion_stats(&db, &caller).await,
         (_, ["api", "v1", "collections", rest @ ..]) => collections(req, &db, &caller, rest).await,
         ("GET", ["api", "v1", "me"]) => me(&db, &caller).await,
         ("GET", ["api", "v1", "tags"]) => {

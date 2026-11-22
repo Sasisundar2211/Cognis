@@ -97,9 +97,14 @@ pub fn build_messages(req: &AskRequest, sources: &[Source]) -> Vec<serde_json::V
     msgs
 }
 
-/// The retrieval query: the question, plus a slice of explicitly shared text.
-pub fn retrieval_query(req: &AskRequest) -> String {
+/// The retrieval query: the question, plus what the user is working on (task keywords from the
+/// observed window) and any shared text. "What did I save about this?" then searches the work itself.
+pub fn retrieval_query(req: &AskRequest, task_keywords: &[String]) -> String {
     let mut q: String = req.question.chars().take(500).collect();
+    for k in task_keywords {
+        q.push(' ');
+        q.push_str(k);
+    }
     if let Some(t) = req.context.as_ref().and_then(|c| c.selected_text.as_deref()) {
         q.push(' ');
         q.extend(t.chars().take(300));
@@ -221,6 +226,7 @@ mod tests {
     fn retrieval_query_includes_shared_text() {
         let mut r = req("how to launch");
         r.context = Some(WorkContext { selected_text: Some("subreddit rules".into()), ..Default::default() });
-        assert_eq!(retrieval_query(&r), "how to launch subreddit rules");
+        assert_eq!(retrieval_query(&r, &[]), "how to launch subreddit rules");
+        assert_eq!(retrieval_query(&req("what did I save about this?"), &["pricing".into(), "seats".into()]), "what did I save about this? pricing seats");
     }
 }

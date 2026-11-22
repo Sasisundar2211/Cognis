@@ -9,8 +9,8 @@ use crate::args;
 use crate::auth::AuthUser;
 use crate::db::{self, Arg, Count};
 use crate::error::{ApiError, ApiResult};
-use crate::ingest::extract::{extract_html, extract_plain};
-use crate::ingest::fetch::{safe_fetch, PageFetcher};
+use crate::ingest::fetch::PageFetcher;
+use crate::ingest::platforms::extract_link;
 use crate::ingest::url_safety::{assert_fetchable, canonicalize, detect_platform};
 use crate::plans::limits;
 use crate::retrieval::embed::{embedding_text, to_blob, Embedder};
@@ -253,7 +253,7 @@ async fn embed_blob(embedder: Option<&Embedder>, text: String) -> (Option<Vec<u8
 
 /// Pipeline: fetch (URL items) -> extract -> embed -> ready. Failures keep a stable code and are retryable.
 /// Embedding failure is not fatal: the item stays searchable by words.
-pub async fn process<F: PageFetcher>(db: &D1Database, embedder: Option<&Embedder>, fetcher: &F, user_id: &str, item_id: &str) -> ApiResult<ItemRow> {
+pub async fn process<F: PageFetcher>(db: &D1Database, embedder: Option<&Embedder>, fetcher: &F, instagram_token: Option<&str>, user_id: &str, item_id: &str) -> ApiResult<ItemRow> {
     let abandoned = iso_from_ms(now_ms() - 300_000.0);
     let claimed = db::run(
         db,
@@ -274,16 +274,20 @@ pub async fn process<F: PageFetcher>(db: &D1Database, embedder: Option<&Embedder
     if let (true, Some(orig)) = (row.kind == "url", row.original_url.as_deref()) {
         let start = url::Url::parse(orig).map_err(|_| ApiError::internal())?;
         let host = start.host_str().unwrap_or("").to_string();
-        match safe_fetch(fetcher, start).await {
-            Ok(page) => {
-                let ex = if page.content_type == "text/plain" { extract_plain(&page.body) } else { extract_html(&page.body) };
+        match extract_link(fetcher, start, instagram_token).await {
+            Ok(k) => {
+                let ex = k.ex;
                 if title.is_empty() {
-                    title = if ex.title.is_empty() { page.final_url.host_str().unwrap_or("").to_string() } else { ex.title.clone() };
+                    title = if ex.title.is_empty() { k.final_url.host_str().unwrap_or("").to_string() } else { ex.title.clone() };
                 }
                 description = ex.description;
                 extracted = ex.text;
-                meta["finalUrl"] = json!(page.final_url.as_str());
-                meta["contentType"] = json!(page.content_type);
+                if let Value::Object(m) = k.meta {
+                    for (key, val) in m {
+                        meta[key] = val;
+                    }
+                }
+                meta["finalUrl"] = json!(k.final_url.as_str());
                 if !ex.site_name.is_empty() {
                     meta["siteName"] = json!(ex.site_name);
                 }

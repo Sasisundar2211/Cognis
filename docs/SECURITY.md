@@ -20,13 +20,16 @@
 | Injection | Bound parameters everywhere; FTS terms quoted | `search.test.mjs` |
 | Error leakage | Stable codes and request ids; driver errors logged by category only | `items.test.mjs` |
 | Logging | Method, coarse route (no ids), status, latency, counts. Never bodies, questions, emails or content | code review |
-| Desktop | Web view has no network access (CSP `connect-src ipc:`); only Cognis commands and window hide are allowed; HTTPS-only servers (localhost excepted); no background capture; clipboard read only on explicit click with visible preview | `api.rs` tests, capability file |
+| Desktop | Web view has no network access (CSP `connect-src ipc:`); only Cognis commands and window hide are allowed; HTTPS-only servers (localhost excepted); no clipboard access at all (plugin removed) | `api.rs` tests, capability file |
+| Observe (WorkContext) | Opt-in, off by default, visible in tray and window; reads only app name and window title; password managers, private windows, lock screens and Cognis skipped on device and again on server; titles never stored or logged; strict request schema rejects any other field; rate limits: 4 s stability, 6 s between requests, 90 s between panels, 40 panels per day | `observe.rs` and `context.rs` unit tests, `observe.test.mjs` |
+| Platform imports | Only official public routes (Reddit JSON, oEmbed, GitHub API); no login, no media download; every request goes through the SSRF-checked fetcher; JSON responses parsed into plain text | `platforms.rs` unit tests |
 
 ## Known gaps
 
 - No independent security review of this codebase yet.
 - Rate limits for auth are per IP and email in D1; a distributed attacker can still try slow credential stuffing. Add Cloudflare Turnstile on sign-up and sign-in before launch.
 - scrypt parameters are below OWASP's strongest recommendation because of Workers CPU cost. Raise N when moving to a larger CPU budget; the hash format supports it.
+- Observe has not had an independent security review. The original brief requires one before WorkContext reaches production users.
 - The written-answer path of `/ask` has not run against the real model. Prompt-injection resistance of the model itself is not measured.
 - Desktop installers are unsigned.
 - `npm audit` lists advisories in dev-only tooling (wrangler, miniflare). Nothing from them ships.

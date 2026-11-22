@@ -145,6 +145,13 @@ pub fn decode_entities(s: &str) -> String {
                 "quot" => Some('"'),
                 "apos" | "#39" => Some('\''),
                 "nbsp" => Some(' '),
+                "mdash" => Some('\u{2014}'),
+                "ndash" => Some('\u{2013}'),
+                "hellip" => Some('\u{2026}'),
+                "lsquo" => Some('\u{2018}'),
+                "rsquo" => Some('\u{2019}'),
+                "ldquo" => Some('\u{201C}'),
+                "rdquo" => Some('\u{201D}'),
                 _ => None,
             };
             let ch = named.or_else(|| {

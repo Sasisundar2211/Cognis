@@ -65,6 +65,8 @@ export const api = {
   },
   getItem: (id: string) => request<{ item: Item }>(`/items/${encodeURIComponent(id)}`),
   createItem: (input: Record<string, unknown>) => request<{ item: Item; duplicate: boolean }>("/items", { method: "POST", json: input }),
+  batch: (urls: string[], tags: string[] = []) =>
+    request<{ queued: number; results: { url: string; itemId?: string; duplicate?: boolean; error?: { code: string; message: string } }[] }>("/items/batch", { method: "POST", json: { urls, tags } }),
   updateItem: (id: string, patch: Record<string, unknown>) => request<{ item: Item }>(`/items/${encodeURIComponent(id)}`, { method: "PATCH", json: patch }),
   deleteItem: (id: string) => request<void>(`/items/${encodeURIComponent(id)}`, { method: "DELETE" }),
   retryItem: (id: string) => request<{ item: Item }>(`/items/${encodeURIComponent(id)}/retry`, { method: "POST" }),
@@ -132,7 +134,9 @@ export const ERROR_TEXT: Record<string, string> = {
   extract_failed: "Cognis could not read the page content.",
   http_403: "The site refused the request. It may block automated reading.",
   http_404: "The page was not found.",
-  http_429: "The site is rate limiting requests. Try again later.",
+  http_429: "The site is rate limiting requests. Cognis will retry automatically.",
+  login_wall: "This platform only shows the post to signed-in visitors, so Cognis could not read it. The link is saved; add a note with what it said.",
+  parse_failed: "The platform answered in an unexpected format.",
 };
 
 export function ingestError(code: string | null): string {

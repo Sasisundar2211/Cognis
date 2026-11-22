@@ -21,7 +21,7 @@ One Worker, one origin, one deploy. No microservices.
 ## The Grok-style workflow
 
 1. The companion runs in the tray. The global hotkey (Ctrl/Cmd + Shift + Space) shows an always-on-top window.
-2. The user asks a question. Optionally they share clipboard text after seeing a preview.
+2. The user asks a question. If Observe is on, the app name and window title in front go along as context.
 3. The Rust core in the companion posts to `POST /api/v1/ask` with the device token.
 4. The API runs hybrid search over the user's own items (top 6, ready, not archived).
 5. It streams server-sent events: `status` (searching), `sources` (numbered items), `status` (writing), `delta` (answer text), `done`.
@@ -29,6 +29,23 @@ One Worker, one origin, one deploy. No microservices.
 7. The companion renders citations as buttons that open the original links, keeps 6 turns for follow-ups, and hides on Esc.
 
 Without the language model (local dev, outage, quota), `/ask` returns the matching sources and says no written answer is available.
+
+## Observe: working beside you
+
+1. Observe is on (opt-in). Every 2 s the companion reads the app name and title of the window in front (`active-win-pos-rs`, with an X11 `WM_NAME` fallback).
+2. On the device: skip Cognis's own windows (keeping the last work context), skip private windows, wait until the window stays in front for about 4 s, never resend the same window, at most one request per 6 s.
+3. `POST /api/v1/context/suggest {appName, windowTitle}` (device token).
+4. Server: `context::extract_task` turns the title into a TaskContext (focus phrase, keywords, confidence), skipping private windows again.
+5. Hybrid search over the user's ready items with the task keywords; items shown in the last 30 min or dismissed in the last 7 days are removed; only items with word evidence or a strong meaning match are kept.
+6. `context::gate` picks SILENT, PASSIVE, SUGGEST or HIGH_CONFIDENCE. Cooldown (90 s) and a daily cap (40) demote to PASSIVE.
+7. SUGGEST or higher is logged (item ids only) and returned; the companion shows the beside panel without taking focus.
+8. Feedback (`useful`, `not_useful`, `opened`, `dismissed`) feeds the Useful Intervention Rate at `GET /api/v1/suggestions/stats`.
+
+When Observe is on, `/ask` also receives the current window, and its task keywords join the retrieval query.
+
+## Saved posts and reels from a link
+
+`ingest/platforms.rs` routes each link to the platform's official public source: Reddit post JSON (post and top comments), oEmbed for X, YouTube (plus the watch page description) and TikTok, Instagram's Graph oEmbed when `INSTAGRAM_OEMBED_TOKEN` is set, the GitHub README API, and the page itself for everything else. Pages that only show a sign-in prompt fail with `login_wall`. `POST /api/v1/items/batch` takes up to 50 links; the first 5 process right away and a cron trigger (every 5 minutes) processes the rest, reclaims abandoned items and retries transient failures.
 
 ## API code layout (`api/src`)
 
@@ -42,6 +59,8 @@ Without the language model (local dev, outage, quota), `/ask` returns the matchi
 | `ingest/` | URL safety (SSRF), safe fetch with redirect re-validation, HTML extraction (lol_html) |
 | `retrieval/` | Embedder, filters, ranking (terms, RRF, explanations), D1 search |
 | `ask.rs` | Prompt building, delimiter hardening, SSE framing, model stream parsing, citation checks |
+| `context.rs` | TaskContext from window titles, private-window rules, relevance gate |
+| `ingest/platforms.rs` | Official routes and parsers for Reddit, X, YouTube, TikTok, Instagram, GitHub; login-wall detection |
 | `db.rs`, `http.rs`, `error.rs`, `util.rs`, `email.rs`, `audit.rs`, `plans.rs` | Helpers |
 
 Pure logic (`util`, `password`, `ingest`, `retrieval/rank`, `retrieval/embed`, `ask`) compiles natively and has unit tests. Worker-bound code is covered by the HTTP suite.
@@ -65,8 +84,10 @@ Pure logic (`util`, `password`, `ingest`, `retrieval/rank`, `retrieval/embed`, `
 | File | Responsibility |
 |---|---|
 | `src-tauri/src/lib.rs` | Tray, global hotkey, window toggle, commands, keychain, config |
+| `src-tauri/src/observe.rs` | Observe loop, debounce, private-window filter, beside panel |
+| `src/beside.ts`, `beside.html` | Beside panel UI: cards, feedback, Ask about this |
 | `src-tauri/src/api.rs` | HTTPS client, server URL validation, SSE parser |
-| `src/main.ts` | UI: sign-in, conversation, streaming render, citations, clipboard preview |
+| `src/main.ts` | UI: sign-in, conversation, streaming render, citations, Observe toggle and "Working on" line |
 | `src-tauri/capabilities/default.json` | The web view may only call Cognis commands and hide the window |
 
 ## Why the TypeScript worker is still here

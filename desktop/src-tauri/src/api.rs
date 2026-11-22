@@ -95,6 +95,15 @@ impl Api {
         res.json().await.map_err(net_err)
     }
 
+    /// POST expecting an empty (204) answer.
+    pub async fn post_empty(&self, token: &str, path: &str, body: &Value) -> R<()> {
+        let res = self.http.post(self.url(path)).bearer_auth(token).json(body).send().await.map_err(net_err)?;
+        if !res.status().is_success() {
+            return Err(error_from(res).await);
+        }
+        Ok(())
+    }
+
     /// Revokes this device's session on the server. Best effort: local sign-out happens regardless.
     pub async fn sign_out(&self, token: &str) {
         let _ = self.http.post(self.url("/api/auth/sign-out")).bearer_auth(token).send().await;

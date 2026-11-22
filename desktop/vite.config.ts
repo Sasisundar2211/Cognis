@@ -3,5 +3,9 @@ import { defineConfig } from "vite";
 export default defineConfig({
   clearScreen: false,
   server: { port: 1420, strictPort: true },
-  build: { target: "es2022", sourcemap: false },
+  build: {
+    target: "es2022",
+    sourcemap: false,
+    rollupOptions: { input: { main: "index.html", beside: "beside.html" } },
+  },
 });

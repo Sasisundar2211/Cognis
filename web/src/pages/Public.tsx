@@ -150,11 +150,12 @@ export function Privacy() {
         <li>What you save: links, the readable text Cognis extracts from those pages, your notes, tags and collections.</li>
         <li>A numeric embedding of each item, used for search by meaning.</li>
         <li>Security events (for example "signed in", "item deleted") with a timestamp. These never contain item content.</li>
+        <li>Which saved items Observe suggested, when, and whether you marked them useful. Not the window titles that led to them.</li>
       </ul>
       <h2>What Cognis does not do</h2>
       <ul>
         <li>No ads, no analytics scripts, no third-party trackers, no selling data.</li>
-        <li>No reading of your screen, camera or microphone. The desktop companion reads your clipboard only when you click Include clipboard or Save clipboard, and shows the text first.</li>
+        <li>No screenshots, keystrokes, clipboard, camera or microphone. With Observe turned on, the desktop companion sends the name and title of the window in front of you to find related items. Cognis does not store them.</li>
         <li>No other user can see your items. Every request is checked against your account.</li>
       </ul>
       <h2>Who processes your data</h2>
@@ -187,8 +188,11 @@ export function Help() {
       <p>Press / anywhere to jump to search.</p>
       <h2>Organizing</h2>
       <p>Add tags when you save or edit. Group items into collections from an item's page. Archive items to keep them out of search without deleting them.</p>
+      <h2>Importing saved posts and reels</h2>
+      <p>Paste the link to a saved Reddit post, X post, YouTube video, TikTok, Instagram post or reel, GitHub repository or article. Paste many links at once, one per line, to bring over a whole saved collection. Cognis uses each platform's official public route: Reddit's post data with top comments, oEmbed for X, YouTube and TikTok, the GitHub README, and the page itself for articles. Instagram posts need the Instagram connection set up by the server owner. Cognis never logs in to your accounts and does not download videos, so it keeps captions and text, not spoken audio.</p>
       <h2>Desktop companion</h2>
-      <p>Install the Cognis desktop app and press Ctrl + Shift + Space (Cmd + Shift + Space on Mac) from any app. A small window opens over your work. Ask a question and Cognis answers from what you saved, with numbered sources you can open. Press Esc to hide it. It reads your clipboard only when you choose to share or save it, and shows you the text first.</p>
+      <p>Install the Cognis desktop app and press Ctrl + Shift + Space (Cmd + Shift + Space on Mac) from any app. A small window opens over your work. Ask a question and Cognis answers from what you saved, with numbered sources you can open. Press Esc to hide it.</p>
+      <p>Turn on Observe my work and Cognis watches the name and title of the window in front of you. When a saved item clearly fits what you are doing, a small panel appears at the edge of your screen. It reads nothing else: no screenshots, keystrokes, clipboard or window contents. Password managers and private browser windows are skipped. Turn it off any time from the window or the tray.</p>
       <h2>What is not built yet</h2>
       <ul>
         <li>Context suggestions that surface saved items while you work.</li>

@@ -18,6 +18,8 @@ pub struct Config {
     pub resend_key: Option<String>,
     pub email_from: Option<String>,
     pub llm_model: String,
+    /// Meta app token for Instagram's official oEmbed. Optional; without it Instagram links use the public page.
+    pub instagram_token: Option<String>,
 }
 
 impl Config {
@@ -31,6 +33,7 @@ impl Config {
             resend_key: var("RESEND_API_KEY"),
             email_from: var("EMAIL_FROM"),
             llm_model: var("LLM_MODEL").unwrap_or_else(|| "@cf/meta/llama-3.1-8b-instruct".into()),
+            instagram_token: var("INSTAGRAM_OEMBED_TOKEN").filter(|t| !t.is_empty()),
         }
     }
     pub fn is_test(&self) -> bool {

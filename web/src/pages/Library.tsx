@@ -87,6 +87,14 @@ export function Library() {
       {!filters.archived && (
         <div className="mb-6">
           <Composer
+            onBatch={(r) => {
+              const parts = [`Importing ${r.queued} link${r.queued === 1 ? "" : "s"}. They fill in as each one finishes.`];
+              if (r.duplicates) parts.push(`${r.duplicates} already saved.`);
+              if (r.failed.length) parts.push(`${r.failed.length} skipped: ${r.failed.slice(0, 3).map((f) => f.message).join(" ")}`);
+              setFlash(parts.join(" "));
+              void load();
+              loadFacets();
+            }}
             onSaved={(item, duplicate) => {
               setFlash(duplicate ? "You already saved this. Showing the existing item." : item.kind === "url" ? "Saved. Cognis is reading the page now." : "Saved.");
               void load();

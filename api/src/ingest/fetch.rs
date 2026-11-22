@@ -7,7 +7,8 @@ use super::url_safety::assert_fetchable;
 pub const MAX_BYTES: usize = 1_000_000;
 pub const TIMEOUT_MS: u64 = 8_000;
 pub const MAX_REDIRECTS: usize = 3;
-const ALLOWED_TYPES: [&str; 3] = ["text/html", "application/xhtml+xml", "text/plain"];
+const PAGE_TYPES: &[&str] = &["text/html", "application/xhtml+xml", "text/plain"];
+const JSON_TYPES: &[&str] = &["application/json", "text/json"];
 
 /// One HTTP response as seen by the ingest pipeline. `body` is already capped at the requested size.
 pub struct RawResponse {
@@ -31,7 +32,17 @@ pub struct FetchedPage {
     pub body: String,
 }
 
+/// Fetch a web page (HTML or plain text).
 pub async fn safe_fetch<F: PageFetcher>(fetcher: &F, start: Url) -> Result<FetchedPage, String> {
+    fetch_typed(fetcher, start, PAGE_TYPES).await
+}
+
+/// Fetch a JSON document from an official platform endpoint (oEmbed, Reddit JSON, GitHub API).
+pub async fn safe_fetch_json<F: PageFetcher>(fetcher: &F, start: Url) -> Result<FetchedPage, String> {
+    fetch_typed(fetcher, start, JSON_TYPES).await
+}
+
+async fn fetch_typed<F: PageFetcher>(fetcher: &F, start: Url, allowed: &[&str]) -> Result<FetchedPage, String> {
     let mut url = start;
     for _ in 0..=MAX_REDIRECTS {
         let res = fetcher.get(&url, MAX_BYTES).await?;
@@ -45,7 +56,7 @@ pub async fn safe_fetch<F: PageFetcher>(fetcher: &F, start: Url) -> Result<Fetch
             return Err(format!("http_{}", res.status));
         }
         let ct = res.content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
-        if !ALLOWED_TYPES.contains(&ct.as_str()) {
+        if !allowed.contains(&ct.as_str()) {
             return Err("unsupported_content_type".into());
         }
         if res.content_length.unwrap_or(0) > (MAX_BYTES as u64) * 4 {
@@ -73,7 +84,7 @@ mod wasm {
         async fn get(&self, url: &Url, max_bytes: usize) -> Result<RawResponse, String> {
             let headers = Headers::new();
             let _ = headers.set("User-Agent", "CognisBot/0.2 (+personal knowledge import; fetches only links a user saved)");
-            let _ = headers.set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9");
+            let _ = headers.set("Accept", "text/html,application/xhtml+xml,application/json;q=0.9,text/plain;q=0.8");
             let mut init = RequestInit::new();
             init.with_method(Method::Get).with_headers(headers).with_redirect(RequestRedirect::Manual);
             let req = Request::new_with_init(url.as_str(), &init).map_err(|_| "fetch_failed".to_string())?;

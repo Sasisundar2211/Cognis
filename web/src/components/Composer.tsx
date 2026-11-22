@@ -8,7 +8,9 @@ const URL_RE = /^https?:\/\/\S+$/i;
  * One input for both kinds of saving: paste a link, or write a note.
  * The form decides which by looking at the text, and says so before you save.
  */
-export function Composer({ onSaved }: { onSaved: (item: Item, duplicate: boolean) => void }) {
+export type BatchResult = { queued: number; duplicates: number; failed: { url: string; message: string }[] };
+
+export function Composer({ onSaved, onBatch }: { onSaved: (item: Item, duplicate: boolean) => void; onBatch?: (r: BatchResult) => void }) {
   const id = useId();
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
@@ -19,7 +21,10 @@ export function Composer({ onSaved }: { onSaved: (item: Item, duplicate: boolean
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const trimmed = text.trim();
-  const isLink = URL_RE.test(trimmed);
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const links = tokens.filter((t) => URL_RE.test(t));
+  const isBatch = links.length > 1 && links.length === tokens.length;
+  const isLink = !isBatch && URL_RE.test(trimmed);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -32,6 +37,18 @@ export function Composer({ onSaved }: { onSaved: (item: Item, duplicate: boolean
     setError(null);
     const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
     try {
+      if (isBatch) {
+        if (links.length > 50) throw new ApiError(422, "too_many", "Paste up to 50 links at a time.");
+        const r = await api.batch(links, tagList);
+        setText("");
+        setTags("");
+        onBatch?.({
+          queued: r.queued,
+          duplicates: r.results.filter((x) => x.duplicate).length,
+          failed: r.results.filter((x) => x.error).map((x) => ({ url: x.url, message: x.error!.message })),
+        });
+        return;
+      }
       const res = await api.createItem(
         isLink
           ? { kind: "url", url: trimmed, title: title || undefined, tags: tagList }
@@ -63,7 +80,7 @@ export function Composer({ onSaved }: { onSaved: (item: Item, duplicate: boolean
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit(e);
         }}
-        placeholder="Paste a link or write a note you want to remember"
+        placeholder="Paste saved post or reel links (one per line), or write a note"
         className="resize-none border-transparent bg-transparent px-2 text-[0.9375rem] focus:border-transparent focus:ring-0"
         aria-invalid={error ? true : undefined}
         aria-describedby={`${id}-mode`}
@@ -77,14 +94,20 @@ export function Composer({ onSaved }: { onSaved: (item: Item, duplicate: boolean
       )}
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-line px-2 pt-2.5">
         <p id={`${id}-mode`} className="text-[0.8125rem] text-ink-2" aria-live="polite">
-          {trimmed ? (isLink ? "Cognis will read this page and save its text." : "Saves as a note.") : "Links are read and indexed. Notes are saved as written."}
+          {trimmed
+            ? isBatch
+              ? `${links.length} links. Cognis imports each post, reel or page with its source.`
+              : isLink
+                ? "Cognis will read this link and save its content."
+                : "Saves as a note."
+            : "Paste a link, many links (one per line), or a note."}
         </p>
         <div className="flex items-center gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={() => setMore((m) => !m)} aria-expanded={more}>
             {more ? "Fewer options" : "Title and tags"}
           </Button>
           <Button type="submit" variant="primary" size="sm" loading={busy}>
-            {isLink ? "Save link" : "Save"}
+            {isBatch ? `Import ${links.length} links` : isLink ? "Save link" : "Save"}
           </Button>
         </div>
       </div>

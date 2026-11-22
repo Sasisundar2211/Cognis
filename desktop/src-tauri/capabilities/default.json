@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The companion window may only call Cognis commands and hide itself. Network, clipboard and links go through Rust commands, never directly from the web view.",
-  "windows": ["companion"],
+  "description": "Cognis windows may only call Cognis commands and hide themselves. Network and links go through Rust commands, never directly from the web view.",
+  "windows": ["companion", "beside"],
   "permissions": ["core:default", "core:window:allow-hide", "core:window:allow-start-dragging"]
 }

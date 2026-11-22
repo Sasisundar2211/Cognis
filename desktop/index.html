@@ -43,24 +43,15 @@
         <section id="thread" class="thread" aria-live="polite" aria-label="Conversation">
           <div class="empty" id="empty">
             <p class="lead">Ask anything. Cognis answers from what you saved and shows its sources.</p>
-            <p class="muted small">Type <kbd>/save</kbd> and some text to save a note. Esc hides this window.</p>
+            <p class="muted small">Turn on <strong>Observe my work</strong> and Cognis will bring back saved items when they fit what you are doing. Type <kbd>/save</kbd> with text or links to save them. Esc hides this window.</p>
           </div>
         </section>
         <form id="composer" class="composer">
-          <div class="share" id="share-preview" hidden>
-            <span class="share-label">Sharing this clipboard text with your question:</span>
-            <span class="share-text" id="share-text"></span>
-          </div>
-          <div class="share" id="save-preview" hidden>
-            <span class="share-label">Save this clipboard text to Cognis?</span>
-            <span class="share-text" id="save-text"></span>
-            <span class="composer-row"><button class="primary" type="button" id="save-confirm">Save</button><button class="ghost" type="button" id="save-cancel">Cancel</button></span>
-          </div>
           <label for="q" class="sr-only">Ask Cognis</label>
-          <textarea id="q" rows="2" placeholder="Ask your library, or /save something" maxlength="2000"></textarea>
+          <textarea id="q" rows="2" placeholder="Ask your library, or /save a note or links" maxlength="2000"></textarea>
           <div class="composer-row">
-            <label class="toggle"><input type="checkbox" id="include-clip" /> Include clipboard</label>
-            <button class="ghost" type="button" id="save-clip">Save clipboard</button>
+            <label class="toggle" title="Cognis reads only the app name and window title in front of you"><input type="checkbox" id="observe" /> Observe my work</label>
+            <span class="working" id="working" hidden></span>
             <span class="spacer"></span>
             <button class="primary" type="submit" id="ask-btn">Ask</button>
           </div>

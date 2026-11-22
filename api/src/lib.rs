@@ -4,6 +4,7 @@
 
 pub mod ask;
 pub mod audit;
+pub mod context;
 pub mod auth;
 pub mod db;
 pub mod email;
@@ -17,12 +18,21 @@ pub mod util;
 #[cfg(target_arch = "wasm32")]
 pub mod knowledge;
 #[cfg(target_arch = "wasm32")]
-mod routes;
+pub mod routes;
 
 #[cfg(target_arch = "wasm32")]
 mod entry {
     use super::*;
-    use worker::{event, Context, Env, Request, Response, Result};
+    use worker::{event, Context, Env, Request, Response, Result, ScheduleContext, ScheduledEvent};
+
+    /// Cron: works through pending and transiently failed link imports (see wrangler.jsonc triggers).
+    #[event(scheduled)]
+    async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+        match routes::process_pending(&env).await {
+            Ok(n) => worker::console_log!("{}", serde_json::json!({ "level": "info", "metric": "queue", "processed": n })),
+            Err(_) => worker::console_error!("{{\"level\":\"error\",\"metric\":\"queue\"}}"),
+        }
+    }
 
     #[event(fetch)]
     async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
