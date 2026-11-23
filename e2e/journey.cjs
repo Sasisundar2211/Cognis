@@ -3,6 +3,17 @@ const B = process.env.COGNIS_URL || "http://localhost:8787";
 const SP = process.argv[2] || ".";
 require("fs").mkdirSync(`${SP}/shots`, { recursive: true });
 const log = (...a) => console.log("STEP", ...a);
+/** Wait until a list shows exactly n rows (production latency varies). */
+async function waitCount(locator, n, ms = 10000) {
+  const end = Date.now() + ms;
+  let c = -1;
+  while (Date.now() < end) {
+    c = await locator.count();
+    if (c === n) return c;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return c;
+}
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
@@ -16,17 +27,35 @@ const log = (...a) => console.log("STEP", ...a);
   await page.screenshot({ path: `${SP}/shots/01-landing.png` });
   log("landing ok");
 
+  // A virtual passkey authenticator (Chromium WebAuthn domain), like Touch ID or Windows Hello.
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true } });
+
   await page.goto(B + "/sign-up");
-  await page.fill("#email", email);
-  await page.fill("#password", "short");
+  await page.fill("#email", "not-an-email");
   await page.click("button[type=submit]");
-  await page.getByText("Use at least 10 characters.").first().waitFor();
+  await page.getByText("Enter a valid email address.").first().waitFor();
   log("client validation ok");
-  await page.fill("#password", "e2e-password-long-1");
+  await page.fill("#email", email);
   await page.click("button[type=submit]");
+  await page.getByRole("heading", { name: "Save your recovery codes" }).waitFor();
+  const codes = await page.getByRole("list", { name: "Recovery codes" }).locator("li").allInnerTexts();
+  if (codes.length !== 8) throw new Error("expected 8 recovery codes");
+  await page.getByLabel("I saved these codes somewhere safe.").check();
+  await page.getByRole("button", { name: "Continue to Cognis" }).click();
   await page.waitForURL("**/app/welcome");
   await page.screenshot({ path: `${SP}/shots/02-welcome.png` });
-  log("registered -> welcome");
+  log("registered with passkey -> recovery codes -> welcome");
+
+  // Sign out and back in with the passkey.
+  await page.getByRole("button", { name: "Sign out" }).last().click();
+  await page.waitForURL(B + "/");
+  await page.goto(B + "/sign-in");
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+  await page.waitForURL(B + "/app");
+  await page.goto(B + "/app/welcome");
+  log("signed back in with passkey");
 
   await page.fill("textarea", "Reddit marketing strategy\nPost in niche subreddits, answer questions, and share launch lessons instead of ads.");
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -53,8 +82,7 @@ const log = (...a) => console.log("STEP", ...a);
   // filter by tag
   await page.selectOption("#f-tag", "marketing");
   await page.waitForURL(/tag=marketing/);
-  await page.waitForTimeout(400);
-  const n = await page.getByRole("list", { name: "Saved items" }).locator("li").count();
+  const n = await waitCount(page.getByRole("list", { name: "Saved items" }).locator("li"), 1);
   if (n !== 1) throw new Error("tag filter count " + n);
   log("tag filter ok");
   await page.getByRole("button", { name: "Clear filters" }).click();
@@ -65,11 +93,12 @@ const log = (...a) => console.log("STEP", ...a);
   await page.keyboard.press("Enter");
   await page.waitForURL(/\/app\/search\?q=/);
   await page.getByRole("list", { name: "Search results" }).locator("li").first().waitFor();
-  await page.getByText("Meaning-based search is unavailable").waitFor(); // local dev has no Workers AI
+  const degraded = await page.getByText("Meaning-based search is unavailable").isVisible();
+  log(degraded ? "search ran in word-only mode (no Workers AI here)" : "search used words and meaning (Workers AI on)");
   await page.screenshot({ path: `${SP}/shots/04-search.png` });
   const firstTitle = await page.getByRole("list", { name: "Search results" }).locator("h3").first().innerText();
   if (!/Reddit/.test(firstTitle)) throw new Error("wrong top result " + firstTitle);
-  log("search ok, degraded notice shown honestly");
+  log("search ok");
 
   // detail + edit
   await page.getByRole("list", { name: "Search results" }).locator("a").first().click();
@@ -96,8 +125,7 @@ const log = (...a) => console.log("STEP", ...a);
   await page.getByRole("button", { name: "Delete" }).click();
   await page.getByRole("group", { name: "Confirm delete" }).getByRole("button", { name: "Delete" }).click();
   await page.waitForURL(B + "/app");
-  await page.waitForTimeout(400);
-  const left = await page.getByRole("list", { name: "Saved items" }).locator("li").count();
+  const left = await waitCount(page.getByRole("list", { name: "Saved items" }).locator("li"), 1);
   if (left !== 1) throw new Error("expected 1 item after delete, got " + left);
   log("delete ok");
 
@@ -127,17 +155,19 @@ const log = (...a) => console.log("STEP", ...a);
 
   // delete account
   await page.getByRole("button", { name: "Delete account…" }).click();
-  await page.fill("#delpw", "e2e-password-long-1");
+  await page.fill("#deltext", "DELETE");
   await page.getByRole("button", { name: "Delete my account" }).click();
   await page.waitForURL(/deleted=1/);
-  const after = await page.request.get(B + "/api/v1/me");
-  if (after.status() !== 401) throw new Error("session still valid after delete");
+  const after = await page.evaluate(async () => (await fetch("/api/v1/me")).status);
+  if (after !== 401) throw new Error("session still valid after delete");
   await page.goto(B + "/sign-in");
-  await page.fill("#email", email);
-  await page.fill("#password", "e2e-password-long-1");
-  await page.click("button[type=submit]");
-  await page.getByText("That email and password do not match.").waitFor();
-  log("account deleted, login rejected");
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+  await page.getByText("This passkey is not registered with Cognis").waitFor();
+  log("account deleted, passkey sign-in rejected");
+
+  // recovery code page exists
+  await page.goto(B + "/recover");
+  await page.getByRole("heading", { name: "Sign in with a recovery code" }).waitFor();
 
   // dark mode
   const d = await browser.newContext({ colorScheme: "dark", viewport: { width: 1280, height: 860 } });

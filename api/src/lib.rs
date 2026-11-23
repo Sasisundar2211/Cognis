@@ -7,14 +7,17 @@ pub mod audit;
 pub mod context;
 pub mod auth;
 pub mod db;
+#[allow(dead_code)] // kept for optional email notices once a sender domain exists
 pub mod email;
 pub mod error;
 pub mod http;
 pub mod ingest;
+#[allow(dead_code)] // superseded by passkeys; kept for reference and tests
 pub mod password;
 pub mod plans;
 pub mod retrieval;
 pub mod util;
+pub mod webauthn;
 #[cfg(target_arch = "wasm32")]
 pub mod knowledge;
 #[cfg(target_arch = "wasm32")]

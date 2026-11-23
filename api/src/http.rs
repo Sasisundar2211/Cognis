@@ -32,7 +32,7 @@ impl Config {
             app_url: var("APP_URL").unwrap_or_else(|| "http://localhost:8787".into()).trim_end_matches('/').to_string(),
             resend_key: var("RESEND_API_KEY"),
             email_from: var("EMAIL_FROM"),
-            llm_model: var("LLM_MODEL").unwrap_or_else(|| "@cf/meta/llama-3.1-8b-instruct".into()),
+            llm_model: var("LLM_MODEL").unwrap_or_else(|| "@cf/mistralai/mistral-small-3.1-24b-instruct".into()),
             instagram_token: var("INSTAGRAM_OEMBED_TOKEN").filter(|t| !t.is_empty()),
         }
     }

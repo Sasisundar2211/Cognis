@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { api, type Me } from "../lib/api";
-import { authClient, authErrorMessage } from "../lib/auth";
+import { authClient, authErrorMessage, type Passkey } from "../lib/auth";
 import { PageHeader } from "../components/Shell";
 import { Button, Field, Input, Notice } from "../components/ui";
 
@@ -59,16 +59,124 @@ function DeviceList() {
   );
 }
 
+function Passkeys() {
+  const [list, setList] = useState<Passkey[] | null>(null);
+  const [left, setLeft] = useState(0);
+  const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = async () => {
+    const r = await authClient.listPasskeys();
+    if (r.data) {
+      setList(r.data.passkeys);
+      setLeft(r.data.recoveryCodesLeft);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  return (
+    <div className="grid max-w-md gap-3">
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      {!list ? (
+        <div className="skeleton h-12 w-full" aria-hidden="true" />
+      ) : (
+        <ul className="grid divide-y divide-line rounded-xl border border-line" aria-label="Passkeys">
+          {list.map((p) => (
+            <li key={p.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-[0.875rem]">
+              <span className="min-w-0">
+                <span className="text-ink">{p.name || "Passkey"}</span>
+                <span className="block text-[0.75rem] text-ink-2">Added {new Date(p.createdAt).toLocaleDateString()}{p.lastUsedAt ? `, last used ${new Date(p.lastUsedAt).toLocaleDateString()}` : ""}</span>
+              </span>
+              {list.length > 1 && (
+                <Button size="sm" variant="ghost" onClick={async () => { const r = await authClient.removePasskey(p.id); setMsg(r.error ? { tone: "error", text: authErrorMessage(r.error) } : { tone: "success", text: "Passkey removed." }); await load(); }}>
+                  Remove
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          loading={busy === "add"}
+          onClick={async () => {
+            setBusy("add");
+            const r = await authClient.addPasskey();
+            setBusy(null);
+            setMsg(r.error ? { tone: "error", text: authErrorMessage(r.error) } : { tone: "success", text: "Passkey added. You can sign in with it now." });
+            await load();
+          }}
+        >
+          Add a passkey on another device
+        </Button>
+        <Button
+          variant="ghost"
+          loading={busy === "codes"}
+          onClick={async () => {
+            setBusy("codes");
+            const r = await authClient.newRecoveryCodes();
+            setBusy(null);
+            if (r.error || !r.data) return setMsg({ tone: "error", text: authErrorMessage(r.error) });
+            setCodes(r.data.recoveryCodes);
+            setLeft(r.data.recoveryCodes.length);
+          }}
+        >
+          New recovery codes
+        </Button>
+      </div>
+      <p className="text-[0.8125rem] text-ink-2">{left} unused recovery code{left === 1 ? "" : "s"} left. New codes replace all old ones.</p>
+      {codes && (
+        <div className="rounded-xl bg-panel p-4">
+          <p className="text-[0.8125rem] text-ink">Save these now. They will not be shown again.</p>
+          <ol className="mt-2 grid grid-cols-2 gap-1.5 font-mono text-[0.875rem]">{codes.map((c) => <li key={c}>{c}</li>)}</ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PairDesktop() {
+  const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="grid max-w-md gap-3 text-[0.875rem] text-ink-2">
+      <p>Open the Cognis desktop app, choose Pair with a code, and enter the code below. It works once and expires in 10 minutes.</p>
+      {err && <Notice tone="error">{err}</Notice>}
+      {code ? (
+        <div className="rounded-xl border border-line bg-panel px-4 py-3">
+          <p className="font-mono text-[1.5rem] tracking-[0.12em] text-ink" aria-label="Pairing code">{code.code}</p>
+          <p className="text-[0.75rem]">Expires at {new Date(code.expiresAt).toLocaleTimeString()}. Server address: {location.origin}</p>
+        </div>
+      ) : null}
+      <div>
+        <Button
+          loading={busy}
+          onClick={async () => {
+            setBusy(true);
+            setErr("");
+            const r = await authClient.pairingCode();
+            setBusy(false);
+            if (r.error || !r.data) return setErr(authErrorMessage(r.error));
+            setCode(r.data);
+          }}
+        >
+          {code ? "New code" : "Get a pairing code"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function Account() {
   const nav = useNavigate();
   const [me, setMe] = useState<Me | null>(null);
-  const [cur, setCur] = useState("");
-  const [next, setNext] = useState("");
-  const [pwMsg, setPwMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const [pwBusy, setPwBusy] = useState(false);
+  const [params] = useSearchParams();
+  const recovered = params.get("recovered");
   const [revokeMsg, setRevokeMsg] = useState<string | null>(null);
   const [delOpen, setDelOpen] = useState(false);
-  const [delPw, setDelPw] = useState("");
+  const [delText, setDelText] = useState("");
   const [delErr, setDelErr] = useState("");
   const [delBusy, setDelBusy] = useState(false);
 
@@ -113,30 +221,16 @@ export function Account() {
         </div>
       </Section>
 
-      <Section title="Password">
-        <form
-          className="grid max-w-sm gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (next.length < 10) return setPwMsg({ tone: "error", text: "Use at least 10 characters." });
-            setPwBusy(true);
-            const { error } = await authClient.changePassword({ currentPassword: cur, newPassword: next });
-            setPwBusy(false);
-            if (error) return setPwMsg({ tone: "error", text: authErrorMessage(error) });
-            setCur("");
-            setNext("");
-            setPwMsg({ tone: "success", text: "Password changed. Other devices were signed out." });
-          }}
-        >
-          {pwMsg && <Notice tone={pwMsg.tone}>{pwMsg.text}</Notice>}
-          <Field label="Current password" htmlFor="cur">
-            <Input id="cur" type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} />
-          </Field>
-          <Field label="New password" htmlFor="new" hint="At least 10 characters.">
-            <Input id="new" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} maxLength={128} />
-          </Field>
-          <div><Button type="submit" loading={pwBusy} disabled={!cur || !next}>Change password</Button></div>
-        </form>
+      {recovered !== null && (
+        <Notice tone="warn">You signed in with a recovery code. {recovered} left. Add a passkey on this device now so you do not run out.</Notice>
+      )}
+
+      <Section title="Passkeys" description="How you sign in. Add one on each device you use. Recovery codes work if you lose them all.">
+        <Passkeys />
+      </Section>
+
+      <Section title="Desktop companion" description="Connect the Cognis desktop app to this account.">
+        <PairDesktop />
       </Section>
 
       <Section title="Devices" description="Browsers and desktop companions signed in to your account.">
@@ -164,7 +258,7 @@ export function Account() {
               e.preventDefault();
               setDelBusy(true);
               setDelErr("");
-              const { error } = await authClient.deleteUser({ password: delPw });
+              const { error } = await authClient.deleteAccount();
               setDelBusy(false);
               if (error) return setDelErr(authErrorMessage(error));
               nav("/?deleted=1", { replace: true });
@@ -172,11 +266,11 @@ export function Account() {
           >
             <Notice tone="warn">This cannot be undone. Download your data first if you want a copy.</Notice>
             {delErr && <Notice tone="error">{delErr}</Notice>}
-            <Field label="Enter your password to confirm" htmlFor="delpw">
-              <Input id="delpw" type="password" autoComplete="current-password" value={delPw} onChange={(e) => setDelPw(e.target.value)} />
+            <Field label="Type DELETE to confirm" htmlFor="deltext" hint="For your safety this needs a sign-in from the last 15 minutes.">
+              <Input id="deltext" autoComplete="off" value={delText} onChange={(e) => setDelText(e.target.value)} />
             </Field>
             <div className="flex gap-2">
-              <Button type="submit" variant="danger" loading={delBusy} disabled={!delPw}>Delete my account</Button>
+              <Button type="submit" variant="danger" loading={delBusy} disabled={delText !== "DELETE"}>Delete my account</Button>
               <Button type="button" variant="ghost" onClick={() => setDelOpen(false)}>Cancel</Button>
             </div>
           </form>

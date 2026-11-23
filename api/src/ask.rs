@@ -126,6 +126,14 @@ pub fn sse(event: &str, data: &serde_json::Value) -> Vec<u8> {
     format!("event: {event}\ndata: {data}\n\n").into_bytes()
 }
 
+/// Answer text from a Workers AI chat result: `{response}` (classic) or OpenAI-style `choices[0].message.content`.
+pub fn answer_text(v: &serde_json::Value) -> String {
+    if let Some(r) = v.get("response").and_then(|r| r.as_str()) {
+        return r.to_string();
+    }
+    v.pointer("/choices/0/message/content").and_then(|c| c.as_str()).unwrap_or("").to_string()
+}
+
 /// Incremental parser for Workers AI's streaming output ("data: {\"response\":\"...\"}" lines).
 #[derive(Default)]
 pub struct LlmStreamParser {
@@ -146,10 +154,10 @@ impl LlmStreamParser {
                 continue;
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                if let Some(t) = v.get("response").and_then(|r| r.as_str()) {
-                    if !t.is_empty() {
-                        out.push(t.to_string());
-                    }
+                // Classic {"response": "..."} or OpenAI-style {"choices":[{"delta":{"content":"..."}}]}.
+                let t = v.get("response").and_then(|r| r.as_str()).or_else(|| v.pointer("/choices/0/delta/content").and_then(|c| c.as_str()));
+                if let Some(t) = t.filter(|t| !t.is_empty()) {
+                    out.push(t.to_string());
                 }
             }
         }
@@ -196,6 +204,9 @@ mod tests {
         assert_eq!(p.push(b"se\":\"Hel\"}\n\ndata: {\"response\":\"lo\"}\n"), ["Hel", "lo"]);
         assert!(p.push(b"data: [DONE]\n").is_empty());
         assert!(p.push(b"data: not json\n").is_empty());
+        assert_eq!(p.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n"), ["Hi"]);
+        assert_eq!(answer_text(&serde_json::json!({ "choices": [{ "message": { "content": "Yes [1]" } }] })), "Yes [1]");
+        assert_eq!(answer_text(&serde_json::json!({ "response": "Ok" })), "Ok");
     }
 
     #[test]

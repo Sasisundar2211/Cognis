@@ -87,7 +87,7 @@ export const api = {
 
 export const SOURCE_LABELS: Record<string, string> = {
   web: "Web", manual: "Note", browser: "Browser", reddit: "Reddit", github: "GitHub", youtube: "YouTube",
-  linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium",
+  linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium", tiktok: "TikTok",
 };
 
 export function sourceLabel(s: string) {
@@ -137,6 +137,7 @@ export const ERROR_TEXT: Record<string, string> = {
   http_429: "The site is rate limiting requests. Cognis will retry automatically.",
   login_wall: "This platform only shows the post to signed-in visitors, so Cognis could not read it. The link is saved; add a note with what it said.",
   parse_failed: "The platform answered in an unexpected format.",
+  no_content: "The platform returned a page with no readable text for this post. The link is saved; add a note with what it said.",
 };
 
 export function ingestError(code: string | null): string {

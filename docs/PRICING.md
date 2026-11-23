@@ -18,12 +18,11 @@ Payment provider: not connected. Polar (polar.sh) fits the open-source preferenc
 |---|---|---|---|
 | Workers | 100k requests/day, 10 ms CPU | API + static assets | $5/month: 10M requests, 30 s CPU |
 | D1 | 5 GB, 5M rows read/day, 100k rows written/day | All data, FTS, vectors | Included in $5 plan, then usage-based |
-| Workers AI | 10,000 neurons/day | Embeddings on save and search | $0.011 per 1,000 neurons |
+| Workers AI | 10,000 neurons/day | Embeddings on save and search, answers (about 5 neurons per short answer measured) | $0.011 per 1,000 neurons |
 | Static assets | Free, unlimited | Web app | Free |
 | Rate Limiting | Free | Abuse control | Free |
 | Domain | none (workers.dev subdomain) | | ~$10/year |
-| Resend email | 3,000/month, 100/day | Verification, reset | $20/month for 50k |
 
 Check current limits on Cloudflare's pricing pages before launch; they change.
 
-Realistic minimum for a working launch: $5/month (Workers Paid, required because password hashing needs about 250 ms CPU) plus about $10/year (domain, needed for email). Workers AI usage for answers is billed per neuron above the free daily allocation; measure it after launch before setting paid-plan answer limits. Optional: Apple Developer Program ($99/year) to sign the macOS companion.
+Current cost: $0. Cognis runs on the Workers Free plan with passkey sign-in, no email and no domain. Move to Workers Paid ($5/month) when daily requests or AI neurons pass the free limits. Optional: Apple Developer Program ($99/year) to sign the macOS companion.

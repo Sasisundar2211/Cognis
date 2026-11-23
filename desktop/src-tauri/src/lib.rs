@@ -112,12 +112,12 @@ fn status(state: State<AppState>) -> Status {
 }
 
 #[tauri::command]
-async fn sign_in(app: AppHandle, state: State<'_, AppState>, server: String, email: String, password: String) -> Result<Status, ApiError> {
+async fn sign_in(app: AppHandle, state: State<'_, AppState>, server: String, code: String) -> Result<Status, ApiError> {
     let base = parse_server(&server)?;
     let api = Api::new(base.clone());
     let host = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")).unwrap_or_default();
     let device = if host.is_empty() { "Desktop companion".to_string() } else { format!("Desktop companion on {}", truncate(&host, 40)) };
-    let (user, token) = api.sign_in(email.trim(), &password, &device).await?;
+    let (user, token) = api.pair(code.trim(), &device).await?;
     let server_s = base.to_string();
     let stored = keyring_entry(&server_s).map(|e| e.set_password(&token).is_ok()).unwrap_or(false);
     {

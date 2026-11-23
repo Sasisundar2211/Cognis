@@ -8,8 +8,7 @@
   "observability": { "enabled": true },
   "assets": { "directory": "../web/dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
   "d1_databases": [
-    // Replace database_id with the id printed by `wrangler d1 create cognis`.
-    { "binding": "DB", "database_name": "cognis", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+        { "binding": "DB", "database_name": "cognis", "database_id": "6c7dd18a-d7da-406a-bfec-8b22724ff8f0", "migrations_dir": "migrations" }
   ],
   "ai": { "binding": "AI" },
   "ratelimits": [
@@ -20,7 +19,8 @@
     "APP_ENV": "production",
     "EMAIL_MODE": "disabled",
     "EMBEDDER": "workers-ai",
-    "LLM_MODEL": "@cf/meta/llama-3.1-8b-instruct"
+    "LLM_MODEL": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+    "APP_URL": "https://cognis.sasisundhar2211.workers.dev"
   }
-  // Secrets (wrangler secret put): APP_URL, RESEND_API_KEY and EMAIL_FROM (only with EMAIL_MODE=resend)
+  // Optional secret (wrangler secret put): INSTAGRAM_OEMBED_TOKEN for Instagram posts and reels
 }

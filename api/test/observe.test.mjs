@@ -1,6 +1,6 @@
 import { before, test } from "node:test";
 import assert from "node:assert/strict";
-import { BASE, call, createText, newUser, PASSWORD } from "./helpers.mjs";
+import { BASE, call, createText, newUser, deviceToken } from "./helpers.mjs";
 
 // Observe mode: the desktop sends app name + window title; the server decides SILENT / PASSIVE / SUGGEST / HIGH_CONFIDENCE.
 
@@ -9,7 +9,7 @@ const ids = {};
 
 before(async () => {
   u = await newUser("observe");
-  token = (await (await call("/api/auth/sign-in", { method: "POST", json: { email: u.email, password: PASSWORD, device: "Observer" } })).json()).token;
+  token = await deviceToken(u.cookie, "Observer");
   for (const [k, text] of [
     ["reddit", "Reddit marketing strategy for startups\nPost in niche subreddits, answer questions, share launch lessons."],
     ["positioning", "Positioning for a startup\nSay who you serve and the problem you solve in one sentence."],
@@ -31,7 +31,7 @@ test("relevant work produces a suggestion with source, reason and task", async (
 
 test("cooldown: a second strong match right away is held back as PASSIVE", async () => {
   const c = await newUser("cool");
-  const t = (await (await call("/api/auth/sign-in", { method: "POST", json: { email: c.email, password: PASSWORD, device: "d" } })).json()).token;
+  const t = await deviceToken(c.cookie, "d");
   await createText(c.cookie, "Kubernetes autoscaling runbook\nScale pods on queue depth, not CPU.");
   await createText(c.cookie, "Sourdough starter feeding\nFeed equal flour and water every morning.");
   const first = await (await observe("Code", "kubernetes autoscaling runbook — infra — Visual Studio Code", { bearer: t })).json();
@@ -63,7 +63,7 @@ test("private windows are never analyzed", async () => {
 
 test("feedback and Useful Intervention Rate", async () => {
   const v = await newUser("uir");
-  const t = (await (await call("/api/auth/sign-in", { method: "POST", json: { email: v.email, password: PASSWORD, device: "d" } })).json()).token;
+  const t = await deviceToken(v.cookie, "d");
   await createText(v.cookie, "Pricing a developer tool\nCharge per seat once a team adopts it.");
   const r = await (await observe("Code", "pricing developer tool seat plan — cognis — Visual Studio Code", { bearer: t })).json();
   assert.ok(r.suggestionId, JSON.stringify(r));
@@ -80,7 +80,7 @@ test("feedback and Useful Intervention Rate", async () => {
 
 test("a dismissed item is not suggested again for the same work", async () => {
   const w = await newUser("dismiss");
-  const t = (await (await call("/api/auth/sign-in", { method: "POST", json: { email: w.email, password: PASSWORD, device: "d" } })).json()).token;
+  const t = await deviceToken(w.cookie, "d");
   const id = (await createText(w.cookie, "Cold email template for investors\nKeep it to five sentences.")).body.item.id;
   const first = await (await observe("Mail", "Cold email to investors draft - Mail", { bearer: t })).json();
   assert.equal(first.suggestions[0]?.item.id, id, JSON.stringify(first));

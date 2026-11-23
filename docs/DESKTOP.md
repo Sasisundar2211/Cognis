@@ -45,7 +45,7 @@ Off by default. Your choice is remembered. Turn it off any time from the window 
 
 ## Sign-in and the device token
 
-1. Enter your server address, email and password once.
+1. In the web app, open Account, Desktop companion, and press Create pairing code. Enter the server address (https://cognis.sasisundhar2211.workers.dev) and the 8-character code in the companion. The code works once and expires after 10 minutes.
 2. The server returns a device token, kept in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service).
 3. It shows in the web app under Account, Devices. Sign it out there to revoke it immediately.
 

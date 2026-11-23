@@ -18,7 +18,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 const errMsg = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as ApiErr).message) : "Something went wrong.");
 const hotkeyLabel = (h: string) => h.replace("CommandOrControl", navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl").replaceAll("+", " + ");
 
-const LABELS: Record<string, string> = { manual: "Note", browser: "Desktop", web: "Web", reddit: "Reddit", github: "GitHub", youtube: "YouTube", linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium" };
+const LABELS: Record<string, string> = { manual: "Note", browser: "Desktop", web: "Web", reddit: "Reddit", github: "GitHub", youtube: "YouTube", linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium", tiktok: "TikTok" };
 const label = (p: string) => LABELS[p] ?? p;
 
 const win = getCurrentWindow();
@@ -33,7 +33,7 @@ async function render() {
   $("hotkey-hint").textContent = s.paused ? "Hotkey paused" : `${hotkeyLabel(s.hotkey)} to summon`;
   if (!s.signedIn) {
     if (s.server) $<HTMLInputElement>("server").value = s.server;
-    ($<HTMLInputElement>(s.server ? "email" : "server")).focus();
+    ($<HTMLInputElement>(s.server ? "code" : "server")).focus();
   } else {
     showWorking(s);
     $<HTMLTextAreaElement>("q").focus();
@@ -56,17 +56,17 @@ $("signin-form").addEventListener("submit", async (e) => {
   const errEl = $("signin-error");
   errEl.hidden = true;
   btn.disabled = true;
-  btn.textContent = "Signing in…";
+  btn.textContent = "Connecting…";
   try {
-    await invoke("sign_in", { server: $<HTMLInputElement>("server").value, email: $<HTMLInputElement>("email").value, password: $<HTMLInputElement>("password").value });
-    $<HTMLInputElement>("password").value = "";
+    await invoke("sign_in", { server: $<HTMLInputElement>("server").value, code: $<HTMLInputElement>("code").value });
+    $<HTMLInputElement>("code").value = "";
     await render();
   } catch (err) {
     errEl.textContent = errMsg(err);
     errEl.hidden = false;
   } finally {
     btn.disabled = false;
-    btn.textContent = "Sign in";
+    btn.textContent = "Connect";
   }
 });
 

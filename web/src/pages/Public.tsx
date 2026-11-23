@@ -146,7 +146,7 @@ export function Privacy() {
       <p>This page describes what the current version of Cognis does. It changes when the product changes.</p>
       <h2>What Cognis stores</h2>
       <ul>
-        <li>Your account: email, name, a salted scrypt hash of your password, and your signed-in browsers and desktop companions (stored as one-way hashes).</li>
+        <li>Your account: email, name, the public keys of your passkeys (private keys never leave your devices), recovery codes and signed-in browsers and desktop companions, all stored as one-way hashes. There is no password.</li>
         <li>What you save: links, the readable text Cognis extracts from those pages, your notes, tags and collections.</li>
         <li>A numeric embedding of each item, used for search by meaning.</li>
         <li>Security events (for example "signed in", "item deleted") with a timestamp. These never contain item content.</li>
@@ -161,8 +161,7 @@ export function Privacy() {
       <h2>Who processes your data</h2>
       <ul>
         <li>Cloudflare hosts the app and database (Workers and D1) and runs the open models for search and answers (Workers AI). Your question, the matching saved items, and any text you chose to share are sent to that model to write the answer. Cognis does not store your questions or answers.</li>
-        <li>If email is enabled, Resend delivers verification and password reset emails.</li>
-        <li>When you save a link, Cognis fetches that page from its server, identifying itself as CognisBot.</li>
+                <li>When you save a link, Cognis fetches that page from its server, identifying itself as CognisBot.</li>
       </ul>
       <h2>Deletion and export</h2>
       <ul>
@@ -172,7 +171,7 @@ export function Privacy() {
         <li>Account, then Download my data, gives you everything as JSON.</li>
       </ul>
       <h2>Cookies</h2>
-      <p>One session cookie keeps you signed in. It is HTTP-only and not used for tracking.</p>
+      <p>One session cookie keeps you signed in. It is HTTP-only and not used for tracking. Cognis sends no email.</p>
     </Prose>
   );
 }

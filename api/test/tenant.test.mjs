@@ -1,6 +1,6 @@
 import { before, test } from "node:test";
 import assert from "node:assert/strict";
-import { call, createText, newUser, PASSWORD } from "./helpers.mjs";
+import { call, createText, newUser, deviceToken } from "./helpers.mjs";
 
 // User B must never read, change, search, list or link user A's data.
 let a, b, itemA, colA, bToken;
@@ -11,7 +11,7 @@ before(async () => {
   itemA = (await createText(a.cookie, "Alpha confidential roadmap about kraken pricing", { tags: ["private-tag"] })).body.item.id;
   colA = (await (await call("/api/v1/collections", { method: "POST", cookie: a.cookie, json: { name: "A secrets" } })).json()).collection.id;
   await call(`/api/v1/collections/${colA}/items/${itemA}`, { method: "PUT", cookie: a.cookie });
-  bToken = (await (await call("/api/auth/sign-in", { method: "POST", json: { email: b.email, password: PASSWORD, device: "B desktop" } })).json()).token;
+  bToken = await deviceToken(b.cookie, "B desktop");
 });
 
 test("B cannot read A's item by id (cookie or device token)", async () => {
@@ -77,4 +77,13 @@ test("export contains only the caller's data", async () => {
   const ex = await (await call("/api/v1/export", { cookie: b.cookie })).json();
   assert.ok(!ex.items.some((i) => i.id === itemA));
   assert.ok(!ex.collections.some((c) => c.id === colA));
+});
+
+test("B cannot see or remove A's passkeys", async () => {
+  const aKeys = (await (await call("/api/auth/passkeys", { cookie: a.cookie })).json()).passkeys;
+  const bKeys = (await (await call("/api/auth/passkeys", { cookie: b.cookie })).json()).passkeys;
+  assert.ok(!bKeys.some((k) => k.id === aKeys[0].id));
+  assert.equal((await call(`/api/auth/passkeys/${encodeURIComponent(aKeys[0].id)}`, { method: "DELETE", cookie: b.cookie })).status, 409, "B has one key, so the guard answers first");
+  const aAfter = (await (await call("/api/auth/passkeys", { cookie: a.cookie })).json()).passkeys;
+  assert.equal(aAfter.length, 1);
 });

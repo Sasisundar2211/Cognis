@@ -4,13 +4,12 @@
 
 | Area | Control | Test |
 |---|---|---|
-| Passwords | scrypt (N=2^14, r=16, p=1, 64-byte key, 16-byte salt), constant-time compare, versioned format, NFKC normalization | Rust unit tests |
-| Timing | Unknown emails verify against a dummy hash; same error text for wrong password and unknown user | `auth.test.mjs` |
+| Passkeys (WebAuthn) | No passwords. ES256 and RS256 signatures verified server-side; challenge single use and expiring; origin and RP ID hash checked; user-presence flag required; signature counter regression rejected; last passkey cannot be removed | `webauthn.rs` unit tests, `auth.test.mjs` with a software authenticator and tampered assertions |
+| Recovery and pairing codes | 10 recovery codes, single use, SHA-256 stored, shown once; desktop pairing codes 8 characters, 10 minutes, single use, made only from a browser session | `auth.test.mjs` |
 | Sessions | 256-bit random tokens; only SHA-256 stored; HttpOnly, SameSite=Lax cookie, `__Host-` prefix and Secure on HTTPS; 30-day expiry; server-side revocation | `auth.test.mjs` |
 | Device tokens | Same token scheme, 365 days, labeled, listed and revocable in Account; Bearer only, never a cookie; stored in the OS keychain by the companion | `auth.test.mjs`, `tenant.test.mjs` |
-| Email tokens | Hashed, single use (deleted in the reading statement), 24 h verify, 1 h reset; reset revokes all sessions | `auth.test.mjs` |
-| Account enumeration | Sign-up with an existing email answers the same as a new one (when email is enabled) and notifies the owner; reset answers the same for unknown emails | `auth.test.mjs` |
-| Brute force | D1 fixed-window limits: sign-in 10/min per IP and 5/min per email, sign-up 5/min, reset 3/5 min; API 120/min and ingest 20/min per user; asks per day by plan | config, code review |
+| Account deletion | Typed DELETE confirmation and a browser session under 15 minutes old; device tokens cannot delete the account | `auth.test.mjs`, production journey |
+| Brute force | D1 fixed-window limits: passkey and recovery attempts per IP; API 120/min and ingest 20/min per user; asks per day by plan | config, code review |
 | Mass assignment | Strict serde schemas (`deny_unknown_fields`); plan cannot be set by clients | `auth.test.mjs`, `items.test.mjs` |
 | Tenant isolation | user_id on every query, composite foreign keys, cascade delete | `tenant.test.mjs` (cookie and device token, read, update, delete, retry, search 3 modes, ask, list, tags, sources, collection filter, cross-linking, sessions, export) |
 | CSRF | Cookie requests: Origin must match, Sec-Fetch-Site cross-site rejected, bodies must be JSON. Bearer requests skip these (no ambient credential) | `items.test.mjs`, `auth.test.mjs` |
@@ -27,10 +26,10 @@
 ## Known gaps
 
 - No independent security review of this codebase yet.
-- Rate limits for auth are per IP and email in D1; a distributed attacker can still try slow credential stuffing. Add Cloudflare Turnstile on sign-up and sign-in before launch.
-- scrypt parameters are below OWASP's strongest recommendation because of Workers CPU cost. Raise N when moving to a larger CPU budget; the hash format supports it.
+- Sign-up is open and unverified: anyone can create accounts under any email address. Add Cloudflare Turnstile (free) on sign-up before inviting the public.
+- Recovery codes are the only fallback. Losing every passkey and every code locks the account.
 - Observe has not had an independent security review. The original brief requires one before WorkContext reaches production users.
-- The written-answer path of `/ask` has not run against the real model. Prompt-injection resistance of the model itself is not measured.
+- Prompt-injection resistance of the answer model (Mistral Small 3.1) is not measured.
 - Desktop installers are unsigned.
 - `npm audit` lists advisories in dev-only tooling (wrangler, miniflare). Nothing from them ships.
 - Audit events have no retention job yet.

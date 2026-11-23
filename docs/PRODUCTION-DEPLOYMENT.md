@@ -1,11 +1,10 @@
 # Production deployment (Cloudflare)
 
-Not yet deployed. Run these steps from a machine that can reach `api.cloudflare.com`.
+Live: https://cognis.sasisundhar2211.workers.dev (Workers Free plan, deployed 2026-11-23).
 
-## Decide first
+Costs nothing on the free plan. Passkey sign-in fits the free plan's 10 ms CPU limit. No email or domain is needed.
 
-1. Workers Paid ($5/month). Required: password hashing uses about 250 ms CPU per sign-in; the Free plan allows 10 ms.
-2. Email. Without a domain, keep `EMAIL_MODE=disabled` (no verification, no password reset). With a domain (about $10/year), verify it in Resend (free: 3,000 emails/month) and set `EMAIL_MODE=resend`.
+The API token needs these permissions: Account, Workers Scripts, Edit; Account, D1, Edit; Account, Workers AI, Read; User, Memberships, Read; User, User Details, Read.
 
 ## Steps
 
@@ -15,13 +14,9 @@ cargo install worker-build@0.9.0
 npm install && npm run build -w web
 cd api
 npx wrangler login
-npx wrangler d1 create cognis                  # paste database_id into api/wrangler.jsonc
+npx wrangler d1 create cognis                  # first time only: paste database_id into api/wrangler.jsonc
 npx wrangler d1 migrations apply cognis --remote
-npx wrangler secret put APP_URL                # https://cognis.<your-subdomain>.workers.dev
-# with a domain only:
-#   npx wrangler secret put RESEND_API_KEY
-#   npx wrangler secret put EMAIL_FROM         # Cognis <hello@yourdomain.com>
-#   set "EMAIL_MODE": "resend" in api/wrangler.jsonc
+# APP_URL in api/wrangler.jsonc must equal the public URL: passkeys are bound to that origin.
 # for Instagram posts and reels (optional, free Meta developer app with oEmbed Read):
 #   npx wrangler secret put INSTAGRAM_OEMBED_TOKEN   # app id|client token
 npx wrangler deploy
@@ -35,11 +30,11 @@ curl -s https://<url>/api/v1/ready      # database ok, embeddings configured, an
 COGNIS_URL=https://<url> node e2e/journey.cjs /tmp/prod-check
 ```
 
-The journey creates and deletes one account and expects `EMAIL_MODE=disabled`.
+The journey creates a passkey account with a virtual authenticator, runs every main flow and deletes the account.
 
-Then sign in with the desktop companion using `https://<url>` and ask a question. This is the first run of the real answer path.
+Last production run (2026-11-23, version dc61aa95): every journey step passed; health ok; ready reports database ok, embeddings configured, answers configured.
 
-Also paste one saved link per platform (Reddit post, X post, YouTube video, TikTok, Instagram reel, GitHub repo) and confirm each reaches "ready". This is the first live test of the platform extractors. The cron trigger (`*/5 * * * *`) processes anything still pending.
+Changing the URL (for example a custom domain later) invalidates existing passkeys, because they are bound to the domain. Users would sign in with a recovery code and add a new passkey.
 
 ## Desktop installers
 

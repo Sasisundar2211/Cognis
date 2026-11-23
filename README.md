@@ -6,7 +6,7 @@ Save links and notes from anywhere. Press a hotkey on your desktop and ask. Cogn
 
 ## Status
 
-Works locally end to end: accounts, saving, link import, library, collections, hybrid search, Grok-style ask, desktop companion, export, account deletion. Not yet deployed. See [docs/IMPLEMENTATION-STATUS.md](docs/IMPLEMENTATION-STATUS.md).
+Live at https://cognis.sasisundhar2211.workers.dev on Cloudflare's free plan. Sign in with a passkey (no password). Works end to end: saving, link import, library, collections, hybrid search, Grok-style ask with cited answers, desktop companion with Observe, export, account deletion. See [docs/IMPLEMENTATION-STATUS.md](docs/IMPLEMENTATION-STATUS.md).
 
 ## Parts
 
@@ -17,7 +17,7 @@ Works locally end to end: accounts, saving, link import, library, collections, h
 | `web/` | Web app: library, search, collections, account | React 19, Tailwind 4, Vite |
 | `worker/` | Superseded TypeScript API, kept for reference | Hono, Better Auth |
 
-Search: BM25 full-text plus `bge-small-en-v1.5` embeddings, fused with Reciprocal Rank Fusion (k=60). Answers: `llama-3.1-8b-instruct` on Workers AI, citing sources. Everything is open source.
+Search: BM25 full-text plus `bge-small-en-v1.5` embeddings, fused with Reciprocal Rank Fusion (k=60). Answers: `mistral-small-3.1-24b-instruct` (Apache 2.0) on Workers AI, citing sources. Cognis's code, models and libraries are open source. Cloudflare's hosting is a free tier of a proprietary service; the Workers runtime (workerd) is open source and can self-host the API.
 
 ## Quick start
 
@@ -27,7 +27,7 @@ npm run build -w web
 cargo install worker-build@0.9.0
 rustup target add wasm32-unknown-unknown
 cd api
-npx wrangler d1 migrations apply cognis-dev --local -c wrangler.dev.jsonc
+npx wrangler d1 migrations apply cognis-dev --local -c wrangler.dev.jsonc  # 0001 to 0003
 npx wrangler dev -c wrangler.dev.jsonc          # http://localhost:8787
 ```
 

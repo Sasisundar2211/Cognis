@@ -54,6 +54,7 @@ pub fn route(url: &Url, instagram_token: Option<&str>) -> Route {
             j.set_path(&p);
             Route::Reddit { json: j }
         }
+        "tiktok" if path.contains("/video/") => Route::OEmbed { endpoint: oembed("https://www.tiktok.com/oembed", url, &[]), platform: "tiktok", page_too: false },
         "x" if path.contains("/status/") => Route::OEmbed { endpoint: oembed("https://publish.twitter.com/oembed", url, &[("omit_script", "1"), ("dnt", "true")]), platform: "x", page_too: false },
         "youtube" => Route::OEmbed { endpoint: oembed("https://www.youtube.com/oembed", url, &[("format", "json")]), platform: "youtube", page_too: true },
         "instagram" if instagram_token.is_some() && (path.starts_with("/p/") || path.starts_with("/reel/") || path.starts_with("/reels/") || path.starts_with("/tv/")) => {
@@ -181,10 +182,22 @@ pub async fn extract_link<F: PageFetcher>(fetcher: &F, url: Url, instagram_token
     let platform = detect_platform(&url);
     match route(&url, instagram_token) {
         Route::Reddit { json } => {
-            let page = safe_fetch_json(fetcher, json).await?;
-            let v: Value = serde_json::from_str(&page.body).map_err(|_| "parse_failed".to_string())?;
-            let ex = parse_reddit(&v).ok_or("parse_failed")?;
-            Ok(LinkKnowledge { ex, final_url: url, meta: json!({ "via": "reddit_json" }) })
+            let full = async {
+                let page = safe_fetch_json(fetcher, json).await?;
+                let v: Value = serde_json::from_str(&page.body).map_err(|_| "parse_failed".to_string())?;
+                parse_reddit(&v).ok_or_else(|| "parse_failed".to_string())
+            };
+            match full.await {
+                Ok(ex) => Ok(LinkKnowledge { ex, final_url: url, meta: json!({ "via": "reddit_json" }) }),
+                // Reddit often refuses its JSON to cloud servers; its oEmbed still gives title and author.
+                Err(first) => {
+                    let endpoint = oembed("https://www.reddit.com/oembed", &url, &[]);
+                    match safe_fetch_json(fetcher, endpoint).await.ok().and_then(|p| serde_json::from_str::<Value>(&p.body).ok()).and_then(|v| parse_oembed(&v, "reddit")) {
+                        Some(ex) => Ok(LinkKnowledge { ex, final_url: url, meta: json!({ "via": "reddit_oembed", "partial": true }) }),
+                        None => Err(first),
+                    }
+                }
+            }
         }
         Route::GitHubReadme { api, repo } => match safe_fetch_json(fetcher, api).await {
             Ok(page) => {
@@ -217,9 +230,13 @@ pub async fn extract_link<F: PageFetcher>(fetcher: &F, url: Url, instagram_token
 async fn page_knowledge<F: PageFetcher>(fetcher: &F, url: Url, platform: &str) -> Result<LinkKnowledge, String> {
     let page = safe_fetch(fetcher, url).await?;
     let ex = if page.content_type == "text/plain" { extract_plain(&page.body) } else { extract_html(&page.body) };
-    let social = matches!(platform, "instagram" | "linkedin" | "x" | "reddit");
+    let social = matches!(platform, "instagram" | "linkedin" | "x" | "reddit" | "tiktok");
     if social && is_login_wall(&ex) {
         return Err("login_wall".into());
+    }
+    // A social page with no readable text and no description carries no knowledge (the app shell only).
+    if social && ex.text.trim().is_empty() && ex.description.trim().is_empty() {
+        return Err("no_content".into());
     }
     let mut meta = json!({ "via": "page", "contentType": page.content_type });
     if !ex.site_name.is_empty() {

@@ -1,77 +1,140 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BASE, call, cookieFrom, emailsTo, newUser, PASSWORD } from "./helpers.mjs";
+import { Authenticator, BASE, call, cookieFrom, deviceToken, newUser, signIn } from "./helpers.mjs";
 
-test("verification is required before sign-in", async () => {
-  const email = `unverified-${crypto.randomUUID()}@example.com`;
-  const up = await call("/api/auth/sign-up", { method: "POST", json: { email, password: PASSWORD } });
-  assert.equal(up.status, 200);
-  assert.deepEqual(await up.json(), { verificationRequired: true });
-  assert.equal(cookieFrom(up), "");
-  const si = await call("/api/auth/sign-in", { method: "POST", json: { email, password: PASSWORD } });
-  assert.equal(si.status, 403);
-  assert.equal((await si.json()).error.code, "email_not_verified");
-});
-
-test("full flow: verify link signs in, password stored as scrypt hash only", async () => {
+test("sign up with a passkey: session, recovery codes, no password stored", async () => {
   const u = await newUser("Flow");
+  assert.equal(u.recoveryCodes.length, 8);
+  assert.match(u.recoveryCodes[0], /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
   const me = await (await call("/api/v1/me", { cookie: u.cookie })).json();
   assert.equal(me.user.email, u.email);
   assert.equal(me.user.plan, "free");
-  assert.equal(me.user.emailVerified, true);
-  assert.equal(me.limits.maxItems, 500);
-  const si = await call("/api/auth/sign-in", { method: "POST", json: { email: u.email.toUpperCase(), password: PASSWORD } });
-  assert.equal(si.status, 200, "email matching is case-insensitive");
-  assert.match(cookieFrom(si), /^cognis_session=[A-Za-z0-9_-]{43}$/);
-  const raw = si.headers.getSetCookie()[0];
+  assert.match(u.cookie, /^cognis_session=[A-Za-z0-9_-]{43}$/);
+});
+
+test("sign in with the passkey; counter and signature are enforced", async () => {
+  const u = await newUser("login");
+  const { res, cookie } = await signIn(u.auth);
+  assert.equal(res.status, 200);
+  assert.equal((await call("/api/v1/me", { cookie })).status, 200);
+  const raw = res.headers.getSetCookie()[0];
   assert.match(raw, /HttpOnly/);
   assert.match(raw, /SameSite=Lax/);
+
+  // Tampered signature
+  const o1 = await (await call("/api/auth/passkey/login/options", { method: "POST", json: {} })).json();
+  const bad = await call("/api/auth/passkey/login/verify", { method: "POST", json: u.auth.get(o1, { tamper: true }) });
+  assert.equal(bad.status, 400);
+  assert.equal((await bad.json()).error.details.reason, "bad_signature");
+
+  // Cloned authenticator: counter goes backwards
+  const o2 = await (await call("/api/auth/passkey/login/options", { method: "POST", json: {} })).json();
+  u.auth.count = 0;
+  const cloned = await call("/api/auth/passkey/login/verify", { method: "POST", json: u.auth.get(o2) });
+  assert.equal((await cloned.json()).error.details.reason, "counter_regressed");
 });
 
-test("verify link is single-use and bogus tokens are rejected", async () => {
-  const email = `once-${crypto.randomUUID()}@example.com`;
-  await call("/api/auth/sign-up", { method: "POST", json: { email, password: PASSWORD } });
-  const link = new URL((await emailsTo(email))[0].text.match(/https?:\/\/\S+/)[0]);
-  assert.equal((await call(link.pathname + link.search)).headers.get("location"), "/app/welcome");
-  assert.equal((await call(link.pathname + link.search)).headers.get("location"), "/sign-in?error=invalid_token");
-  assert.equal((await call("/api/auth/verify-email?token=nope")).headers.get("location"), "/sign-in?error=invalid_token");
+test("challenges are single use and bound to the purpose", async () => {
+  const u = await newUser("replay");
+  const opts = await (await call("/api/auth/passkey/login/options", { method: "POST", json: {} })).json();
+  u.auth.count = 100;
+  const resp = u.auth.get(opts);
+  assert.equal((await call("/api/auth/passkey/login/verify", { method: "POST", json: resp })).status, 200);
+  const again = await call("/api/auth/passkey/login/verify", { method: "POST", json: resp });
+  assert.equal(again.status, 400);
+  assert.equal((await again.json()).error.code, "invalid_challenge");
+  const reg = await (await call("/api/auth/passkey/register/options", { method: "POST", json: { email: `p-${crypto.randomUUID()}@example.com` } })).json();
+  const wrongPurpose = await call("/api/auth/passkey/login/verify", { method: "POST", json: u.auth.get(reg) });
+  assert.equal((await wrongPurpose.json()).error.code, "invalid_challenge");
 });
 
-test("wrong password, unknown user, short and long passwords", async () => {
-  const u = await newUser("wrong");
-  const bad = await call("/api/auth/sign-in", { method: "POST", json: { email: u.email, password: "not-the-password" } });
-  assert.equal(bad.status, 401);
-  const unknown = await call("/api/auth/sign-in", { method: "POST", json: { email: "nobody@example.com", password: "whatever-123" } });
-  assert.equal(unknown.status, 401);
-  assert.equal((await bad.json()).error.message, (await unknown.json()).error.message, "same message for both");
-  for (const pw of ["short", "x".repeat(129)]) {
-    const r = await call("/api/auth/sign-up", { method: "POST", json: { email: `p-${crypto.randomUUID()}@example.com`, password: pw } });
-    assert.equal(r.status, 422);
+test("a passkey made for another site or origin is rejected", async () => {
+  for (const [origin, rpId, reason] of [["https://evil.example", "localhost", "wrong_origin"], [new URL(BASE).origin, "evil.example", "wrong_rp"]]) {
+    const a = new Authenticator({ origin, rpId });
+    const opts = await (await call("/api/auth/passkey/register/options", { method: "POST", json: { email: `x-${crypto.randomUUID()}@example.com` } })).json();
+    const r = await call("/api/auth/passkey/register/verify", { method: "POST", json: a.create(opts) });
+    assert.equal(r.status, 400);
+    assert.equal((await r.json()).error.details.reason, reason);
   }
-  const badEmail = await call("/api/auth/sign-up", { method: "POST", json: { email: "not-an-email", password: PASSWORD } });
-  assert.equal(badEmail.status, 422);
 });
 
-test("sign-up rejects unknown fields such as plan", async () => {
-  const email = `plan-${crypto.randomUUID()}@example.com`;
-  const r = await call("/api/auth/sign-up", { method: "POST", json: { email, password: PASSWORD, plan: "pro" } });
-  assert.equal(r.status, 422);
-});
-
-test("existing email: no account enumeration when email is enabled", async () => {
+test("unknown passkeys, duplicate emails and bad input", async () => {
+  const stranger = new Authenticator();
+  stranger.userHandle = "abc";
+  const opts = await (await call("/api/auth/passkey/login/options", { method: "POST", json: {} })).json();
+  const r = await call("/api/auth/passkey/login/verify", { method: "POST", json: stranger.get(opts) });
+  assert.equal(r.status, 401);
+  assert.equal((await r.json()).error.code, "unknown_passkey");
   const u = await newUser("dupe");
-  const r = await call("/api/auth/sign-up", { method: "POST", json: { email: u.email, password: PASSWORD } });
-  assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { verificationRequired: true });
-  assert.ok((await emailsTo(u.email)).some((m) => m.subject.includes("tried to sign up")));
+  const d = await call("/api/auth/passkey/register/options", { method: "POST", json: { email: u.email.toUpperCase() } });
+  assert.equal(d.status, 409);
+  assert.equal((await call("/api/auth/passkey/register/options", { method: "POST", json: { email: "not-an-email" } })).status, 422);
+  assert.equal((await call("/api/auth/passkey/register/options", { method: "POST", json: { email: "a@b.co", plan: "pro" } })).status, 422);
+  assert.equal((await call("/api/auth/passkey/login/verify", { method: "POST", json: { challengeId: "nope", id: "x", clientDataJson: "x", authenticatorData: "x", signature: "x" } })).status, 400);
 });
 
-test("API rejects missing and forged sessions", async () => {
+test("recovery codes sign in once each", async () => {
+  const u = await newUser("recover");
+  const r1 = await call("/api/auth/recovery", { method: "POST", json: { email: u.email, code: u.recoveryCodes[0].toLowerCase().replaceAll("-", " ") } });
+  assert.equal(r1.status, 200);
+  assert.equal((await r1.json()).recoveryCodesLeft, 7);
+  assert.equal((await call("/api/v1/me", { cookie: cookieFrom(r1) })).status, 200);
+  const again = await call("/api/auth/recovery", { method: "POST", json: { email: u.email, code: u.recoveryCodes[0] } });
+  assert.equal(again.status, 401);
+  const other = await newUser("recover2");
+  assert.equal((await call("/api/auth/recovery", { method: "POST", json: { email: other.email, code: u.recoveryCodes[1] } })).status, 401, "codes are bound to their account");
+  const regen = await (await call("/api/auth/recovery-codes", { method: "POST", cookie: u.cookie })).json();
+  assert.equal(regen.recoveryCodes.length, 8);
+  assert.equal((await call("/api/auth/recovery", { method: "POST", json: { email: u.email, code: u.recoveryCodes[2] } })).status, 401, "old codes revoked");
+});
+
+test("add a second passkey, list, and never remove the last one", async () => {
+  const u = await newUser("keys");
+  const second = new Authenticator();
+  const opts = await (await call("/api/auth/passkey/add/options", { method: "POST", cookie: u.cookie })).json();
+  assert.equal(opts.publicKey.excludeCredentials.length, 1);
+  assert.equal(opts.publicKey.user.id, u.auth.userHandle, "same user handle for all passkeys");
+  assert.equal((await call("/api/auth/passkey/add/verify", { method: "POST", cookie: u.cookie, json: { ...second.create(opts), name: "Phone" } })).status, 200);
+  assert.equal((await signIn(second)).res.status, 200);
+  const list = await (await call("/api/auth/passkeys", { cookie: u.cookie })).json();
+  assert.equal(list.passkeys.length, 2);
+  assert.equal(list.recoveryCodesLeft, 8);
+  assert.equal((await call(`/api/auth/passkeys/${list.passkeys[0].id}`, { method: "DELETE", cookie: u.cookie })).status, 204);
+  const last = await call(`/api/auth/passkeys/${list.passkeys[1].id}`, { method: "DELETE", cookie: u.cookie });
+  assert.equal(last.status, 409);
+  // Another user's challenge cannot be used to attach a passkey.
+  const v = await newUser("keys2");
+  const vopts = await (await call("/api/auth/passkey/add/options", { method: "POST", cookie: v.cookie })).json();
+  assert.equal((await call("/api/auth/passkey/add/verify", { method: "POST", cookie: u.cookie, json: new Authenticator().create(vopts) })).status, 400);
+});
+
+test("desktop pairing: one code, one device token, revocable", async () => {
+  const u = await newUser("pair");
+  const { code, expiresAt } = await (await call("/api/auth/pairing", { method: "POST", cookie: u.cookie })).json();
+  assert.match(code, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  assert.ok(new Date(expiresAt) > new Date());
+  const r = await call("/api/auth/pair", { method: "POST", headers: { Origin: "" }, json: { code: code.toLowerCase(), device: "Laptop companion" } });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.getSetCookie().length, 0);
+  const { token } = await r.json();
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal((await call("/api/v1/me", { bearer: token })).status, 200);
+  assert.equal((await call("/api/auth/pair", { method: "POST", json: { code } })).status, 400, "single use");
+  assert.equal((await call("/api/auth/pair", { method: "POST", json: { code: "AAAA-AAAA" } })).status, 400);
+  assert.equal((await call("/api/auth/pairing", { method: "POST", bearer: token })).status, 403, "devices cannot mint pairing codes");
+  const device = (await (await call("/api/auth/sessions", { cookie: u.cookie })).json()).sessions.find((s) => s.kind === "device");
+  assert.equal(device.label, "Laptop companion");
+  assert.equal((await call(`/api/auth/sessions/${device.id}`, { method: "DELETE", cookie: u.cookie })).status, 204);
+  assert.equal((await call("/api/v1/me", { bearer: token })).status, 401);
+});
+
+test("missing and forged sessions are rejected", async () => {
   const r = await call("/api/v1/items");
   assert.equal(r.status, 401);
   assert.equal((await r.json()).error.code, "unauthenticated");
   assert.equal((await call("/api/v1/items", { cookie: "cognis_session=forged" })).status, 401);
   assert.equal((await call("/api/v1/items", { bearer: "forged-token" })).status, 401);
+  assert.deepEqual(await (await call("/api/auth/session")).json(), { user: null });
 });
 
 test("sign-out revokes the session server-side", async () => {
@@ -80,68 +143,24 @@ test("sign-out revokes the session server-side", async () => {
   assert.equal((await call("/api/v1/me", { cookie: u.cookie })).status, 401);
 });
 
-test("password reset via emailed link revokes every session", async () => {
-  const u = await newUser("reset");
-  assert.equal((await call("/api/auth/request-password-reset", { method: "POST", json: { email: u.email } })).status, 200);
-  assert.equal((await call("/api/auth/request-password-reset", { method: "POST", json: { email: "ghost@example.com" } })).status, 200, "same answer for unknown email");
-  const mail = (await emailsTo(u.email)).find((m) => m.subject.includes("Reset"));
-  const token = new URL(mail.text.match(/https?:\/\/\S+/)[0]).searchParams.get("token");
-  const reset = await call("/api/auth/reset-password", { method: "POST", json: { token, newPassword: "a-brand-new-password-7" } });
-  assert.equal(reset.status, 200);
-  assert.equal((await call("/api/v1/me", { cookie: u.cookie })).status, 401);
-  assert.equal((await call("/api/auth/reset-password", { method: "POST", json: { token, newPassword: "another-password-8" } })).status, 400, "token is single-use");
-  assert.equal((await call("/api/auth/sign-in", { method: "POST", json: { email: u.email, password: PASSWORD } })).status, 401);
-  assert.equal((await call("/api/auth/sign-in", { method: "POST", json: { email: u.email, password: "a-brand-new-password-7" } })).status, 200);
-});
-
-test("change password keeps this session and revokes others", async () => {
-  const u = await newUser("chg");
-  const other = cookieFrom(await call("/api/auth/sign-in", { method: "POST", json: { email: u.email, password: PASSWORD } }));
-  const wrong = await call("/api/auth/change-password", { method: "POST", cookie: u.cookie, json: { currentPassword: "nope-nope-nope", newPassword: "next-password-123" } });
-  assert.equal(wrong.status, 401);
-  const ok = await call("/api/auth/change-password", { method: "POST", cookie: u.cookie, json: { currentPassword: PASSWORD, newPassword: "next-password-123" } });
-  assert.equal(ok.status, 200);
-  assert.equal((await call("/api/v1/me", { cookie: u.cookie })).status, 200);
-  assert.equal((await call("/api/v1/me", { cookie: other })).status, 401);
-});
-
-test("desktop device token: bearer auth, listed, revocable, no cookie", async () => {
-  const u = await newUser("dev");
-  const si = await call("/api/auth/sign-in", { method: "POST", json: { email: u.email, password: PASSWORD, device: "Laptop companion" } });
-  assert.equal(si.status, 200);
-  assert.equal(si.headers.getSetCookie().length, 0);
-  const { token } = await si.json();
-  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
-  assert.equal((await call("/api/v1/me", { bearer: token })).status, 200);
-  // Bearer requests carry no ambient credential, so they work without an Origin header.
-  const created = await call("/api/v1/items", { method: "POST", bearer: token, json: { kind: "note", content: "saved from the desktop companion" } });
-  assert.equal(created.status, 201);
-  const sessions = (await (await call("/api/auth/sessions", { cookie: u.cookie })).json()).sessions;
-  const device = sessions.find((s) => s.kind === "device");
-  assert.equal(device.label, "Laptop companion");
-  assert.equal((await call(`/api/auth/sessions/${device.id}`, { method: "DELETE", cookie: u.cookie })).status, 204);
-  assert.equal((await call("/api/v1/me", { bearer: token })).status, 401);
-});
-
 test("foreign origins are rejected on auth and API", async () => {
-  const r = await call("/api/auth/sign-in", { method: "POST", headers: { Origin: "https://evil.example" }, json: { email: "a@example.com", password: PASSWORD } });
+  const r = await call("/api/auth/passkey/login/options", { method: "POST", headers: { Origin: "https://evil.example" }, json: {} });
   assert.equal(r.status, 403);
 });
 
-test("account deletion removes everything and the session", async () => {
+test("account deletion: typed confirmation, fresh session, removes everything", async () => {
   const u = await newUser("del");
   await call("/api/v1/items", { method: "POST", cookie: u.cookie, json: { kind: "note", content: "secret plan zqxdeletionmarker", tags: ["x"] } });
-  await call("/api/v1/collections", { method: "POST", cookie: u.cookie, json: { name: "c1" } });
-  const wrong = await call("/api/auth/delete-account", { method: "POST", cookie: u.cookie, json: { password: "wrong-password-1" } });
-  assert.equal(wrong.status, 401);
-  const del = await call("/api/auth/delete-account", { method: "POST", cookie: u.cookie, json: { password: PASSWORD } });
+  const token = await deviceToken(u.cookie);
+  assert.equal((await call("/api/auth/delete-account", { method: "POST", cookie: u.cookie, json: { confirm: "yes" } })).status, 422);
+  assert.equal((await call("/api/auth/delete-account", { method: "POST", bearer: token, json: { confirm: "DELETE" } })).status, 403, "a device token cannot delete the account");
+  const del = await call("/api/auth/delete-account", { method: "POST", cookie: u.cookie, json: { confirm: "DELETE" } });
   assert.equal(del.status, 200);
   assert.equal((await call("/api/v1/me", { cookie: u.cookie })).status, 401);
-  assert.equal((await call("/api/auth/sign-in", { method: "POST", json: { email: u.email, password: PASSWORD } })).status, 401);
-  // A new account must not see any trace of the deleted one.
+  assert.equal((await call("/api/v1/me", { bearer: token })).status, 401);
+  assert.equal((await signIn(u.auth)).res.status, 401, "passkey removed with the account");
   const v = await newUser("after");
-  const s = await (await call("/api/v1/search?q=zqxdeletionmarker&mode=lexical", { cookie: v.cookie })).json();
-  assert.equal(s.results.length, 0);
+  assert.equal((await (await call("/api/v1/search?q=zqxdeletionmarker&mode=lexical", { cookie: v.cookie })).json()).results.length, 0);
 });
 
 test("security headers and request ids on every API response", async () => {
@@ -150,6 +169,4 @@ test("security headers and request ids on every API response", async () => {
   assert.equal(r.headers.get("cache-control"), "no-store");
   assert.ok(r.headers.get("x-request-id"));
   assert.equal((await (await call("/api/v1/ready")).json()).database, "ok");
-  assert.equal((await call("/api/nope")).status, 401);
-  assert.ok(BASE);
 });

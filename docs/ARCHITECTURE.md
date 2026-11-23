@@ -53,8 +53,9 @@ When Observe is on, `/ask` also receives the current window, and its task keywor
 |---|---|
 | `lib.rs` | Worker entry: static assets vs API, security headers, access log |
 | `routes.rs` | Dispatch, validation, items, search, ask, collections, account, export |
-| `auth.rs` | Sign-up, sign-in, verification, reset, change password, sessions, device tokens, deletion, rate limits |
-| `password.rs` | scrypt hashing, constant-time verify |
+| `auth.rs` | Passkey sign-up and sign-in, recovery codes, pairing codes, sessions, device tokens, deletion, rate limits |
+| `webauthn.rs` | WebAuthn relying party: client data, authenticator data, COSE keys, ES256 and RS256 verification |
+| `password.rs`, `email.rs` | Unused since passkeys; kept for reference |
 | `knowledge.rs` | KnowledgeObject service: create, dedupe, process (fetch, extract, embed), update, delete, tags |
 | `ingest/` | URL safety (SSRF), safe fetch with redirect re-validation, HTML extraction (lol_html) |
 | `retrieval/` | Embedder, filters, ranking (terms, RRF, explanations), D1 search |
@@ -63,13 +64,13 @@ When Observe is on, `/ask` also receives the current window, and its task keywor
 | `ingest/platforms.rs` | Official routes and parsers for Reddit, X, YouTube, TikTok, Instagram, GitHub; login-wall detection |
 | `db.rs`, `http.rs`, `error.rs`, `util.rs`, `email.rs`, `audit.rs`, `plans.rs` | Helpers |
 
-Pure logic (`util`, `password`, `ingest`, `retrieval/rank`, `retrieval/embed`, `ask`) compiles natively and has unit tests. Worker-bound code is covered by the HTTP suite.
+Pure logic (`util`, `webauthn`, `ingest`, `retrieval/rank`, `retrieval/embed`, `ask`) compiles natively and has unit tests. Worker-bound code is covered by the HTTP suite.
 
 ## Data model (`api/migrations/0001_init.sql`)
 
-- `users`: email (lowercase, unique), name, scrypt hash, verified flag, plan.
+- `users`: email (lowercase, unique), name, WebAuthn user handle, plan. Password columns from 0001 are unused.
+- `passkeys`, `webauthn_challenges`, `recovery_codes`, `pairing_codes` (`0003_passkeys.sql`): public keys and counters, single-use challenges, SHA-256 of recovery and pairing codes.
 - `sessions`: SHA-256 of the token only. `kind` is `browser` (30 days) or `device` (365 days, labeled).
-- `email_tokens`: SHA-256 of verification and reset tokens, single use, expiring.
 - `auth_rate_limits`: fixed-window counters keyed by a hash of route and IP or email.
 - `knowledge_items`, `tags`, `item_tags`, `collections`, `collection_items`, `knowledge_fts`, `audit_events`: as before. Join tables carry `user_id` with composite foreign keys so rows can never link objects of different users. Deleting a user cascades to everything.
 

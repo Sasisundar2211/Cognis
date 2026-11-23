@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import "./styles.css";
 import { AppShell } from "./components/Shell";
-import { ForgotPassword, ResetPassword, SignIn, SignUp } from "./pages/Auth";
+import { Recover, SignIn, SignUp } from "./pages/Auth";
 import { Library } from "./pages/Library";
 import { Search } from "./pages/Search";
 import { ItemDetail } from "./pages/ItemDetail";
@@ -19,8 +19,8 @@ const router = createBrowserRouter([
   { path: "/help", element: <Help /> },
   { path: "/sign-in", element: <SignIn /> },
   { path: "/sign-up", element: <SignUp /> },
-  { path: "/forgot-password", element: <ForgotPassword /> },
-  { path: "/reset-password", element: <ResetPassword /> },
+  { path: "/recover", element: <Recover /> },
+  { path: "/forgot-password", element: <Recover /> },
   {
     path: "/app",
     element: <AppShell />,

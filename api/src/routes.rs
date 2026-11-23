@@ -414,12 +414,8 @@ async fn ask_route(mut req: Request, env: &Env, db: &D1Database, cfg: &Config, c
     };
 
     if !b.stream {
-        #[derive(Deserialize)]
-        struct Out {
-            response: Option<String>,
-        }
-        let o: Out = ai.run(&cfg.llm_model, json!({ "messages": messages, "max_tokens": 700, "temperature": 0.3 })).await.map_err(|_| ApiError::new(503, "model_unavailable", "The answer model is busy. Try again in a moment."))?;
-        let answer = o.response.unwrap_or_default();
+        let o: Value = ai.run(&cfg.llm_model, json!({ "messages": messages, "max_tokens": 700, "temperature": 0.3 })).await.map_err(model_error)?;
+        let answer = ask::answer_text(&o);
         let used = ask::cited(&answer, sources.len());
         return http::ok(&json!({ "answer": answer, "sources": source_json, "cited": used, "degraded": out.degraded }));
     }
@@ -428,7 +424,7 @@ async fn ask_route(mut req: Request, env: &Env, db: &D1Database, cfg: &Config, c
     let llm = ai
         .run_bytes(&cfg.llm_model, json!({ "messages": messages, "max_tokens": 700, "temperature": 0.3, "stream": true }))
         .await
-        .map_err(|_| ApiError::new(503, "model_unavailable", "The answer model is busy. Try again in a moment."))?;
+        .map_err(model_error)?;
     let mut head = ask::sse("status", &json!({ "step": "searching" }));
     head.extend(ask::sse("sources", &json!({ "sources": source_json })));
     head.extend(ask::sse("status", &json!({ "step": "writing" })));
@@ -447,6 +443,13 @@ async fn ask_route(mut req: Request, env: &Env, db: &D1Database, cfg: &Config, c
     let res = Response::from_stream(body)?;
     res.headers().set("Content-Type", "text/event-stream")?;
     Ok(res)
+}
+
+/// Log the model error's text (it never contains the prompt) so failures are diagnosable.
+fn model_error(e: worker::Error) -> ApiError {
+    let msg: String = e.to_string().chars().take(200).collect();
+    worker::console_error!("{}", json!({ "level": "error", "kind": "model", "detail": msg }));
+    ApiError::new(503, "model_unavailable", "The answer model is busy. Try again in a moment.").with_details(json!({ "model": msg }))
 }
 
 fn sse_response(bytes: Vec<u8>) -> ApiResult<Response> {
@@ -762,36 +765,35 @@ pub async fn handle(req: Request, env: &Env, ctx: &Context, cfg: &Config, path: 
             let llm = if cfg.embedder == "workers-ai" && env.ai("AI").is_ok() { "configured" } else { "unavailable" };
             return http::json_response(&json!({ "status": if db_ok { "ready" } else { "not_ready" }, "database": if db_ok { "ok" } else { "error" }, "embeddings": emb, "answers": llm }), if db_ok { 200 } else { 503 });
         }
-        ("POST", ["api", "auth", "sign-up"]) => {
-            http::csrf_check(&req, cfg)?;
-            return auth::sign_up(req, &db, cfg).await;
-        }
-        ("POST", ["api", "auth", "sign-in"]) => {
-            http::csrf_check(&req, cfg)?;
-            return auth::sign_in(req, &db, cfg).await;
-        }
-        ("GET", ["api", "auth", "verify-email"]) => return auth::verify_email(&req, &db, cfg).await,
         // Signed-out is a normal state for this probe, not an error.
         ("GET", ["api", "auth", "session"]) => {
             let c = auth::resolve(&req, &db, cfg).await?;
             return http::ok(&json!({ "user": c.map(|c| c.user) }));
         }
-        ("POST", ["api", "auth", "resend-verification"]) => {
+        ("POST", ["api", "auth", "passkey", "register", "options"]) => {
             http::csrf_check(&req, cfg)?;
-            return auth::resend_verification(req, &db, cfg).await;
+            return auth::register_options(req, &db, cfg).await;
         }
-        ("POST", ["api", "auth", "request-password-reset"]) => {
+        ("POST", ["api", "auth", "passkey", "register", "verify"]) => {
             http::csrf_check(&req, cfg)?;
-            return auth::request_reset(req, &db, cfg).await;
+            return auth::register_verify(req, &db, cfg).await;
         }
-        ("POST", ["api", "auth", "reset-password"]) => {
+        ("POST", ["api", "auth", "passkey", "login", "options"]) => {
             http::csrf_check(&req, cfg)?;
-            return auth::reset_password(req, &db, cfg).await;
+            return auth::login_options(req, &db, cfg).await;
         }
-        #[cfg(feature = "test-hooks")]
-        ("GET", ["api", "test", "emails"]) if cfg.is_test() => {
-            let mail: Vec<Value> = crate::email::CAPTURED.with(|c| c.borrow().iter().map(|(to, s, t)| json!({ "to": to, "subject": s, "text": t })).collect());
-            return http::ok(&json!({ "emails": mail }));
+        ("POST", ["api", "auth", "passkey", "login", "verify"]) => {
+            http::csrf_check(&req, cfg)?;
+            return auth::login_verify(req, &db, cfg).await;
+        }
+        ("POST", ["api", "auth", "recovery"]) => {
+            http::csrf_check(&req, cfg)?;
+            return auth::recovery_sign_in(req, &db, cfg).await;
+        }
+        // Desktop companion pairing: no browser involved, no cookie issued.
+        ("POST", ["api", "auth", "pair"]) => {
+            http::csrf_check(&req, cfg)?;
+            return auth::pair(req, &db, cfg).await;
         }
         _ => {}
     }
@@ -809,7 +811,12 @@ pub async fn handle(req: Request, env: &Env, ctx: &Context, cfg: &Config, path: 
 
     match (method.as_str(), segs.as_slice()) {
         ("POST", ["api", "auth", "sign-out"]) => auth::sign_out(&caller, &db, cfg).await,
-        ("POST", ["api", "auth", "change-password"]) => auth::change_password(req, &caller, &db, cfg).await,
+        ("GET", ["api", "auth", "passkeys"]) => auth::list_passkeys(&caller, &db).await,
+        ("DELETE", ["api", "auth", "passkeys", id]) => auth::delete_passkey(&caller, &db, id).await,
+        ("POST", ["api", "auth", "passkey", "add", "options"]) => auth::add_options(&caller, &db, cfg).await,
+        ("POST", ["api", "auth", "passkey", "add", "verify"]) => auth::add_verify(req, &caller, &db, cfg).await,
+        ("POST", ["api", "auth", "recovery-codes"]) => auth::regenerate_recovery_codes(&caller, &db).await,
+        ("POST", ["api", "auth", "pairing"]) => auth::create_pairing(&caller, &db, cfg).await,
         ("GET", ["api", "auth", "sessions"]) => auth::list_sessions(&caller, &db).await,
         ("DELETE", ["api", "auth", "sessions", id]) => auth::revoke_session(&caller, &db, id).await,
         ("POST", ["api", "auth", "revoke-other-sessions"]) => auth::revoke_others(&caller, &db).await,

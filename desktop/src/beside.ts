@@ -7,7 +7,7 @@ type Suggestion = { state: string; suggestionId: string | null; task: { focus: s
 
 const $ = (id: string) => document.getElementById(id)!;
 const win = getCurrentWindow();
-const LABELS: Record<string, string> = { manual: "Note", browser: "Desktop", web: "Web", reddit: "Reddit", github: "GitHub", youtube: "YouTube", linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium" };
+const LABELS: Record<string, string> = { manual: "Note", browser: "Desktop", web: "Web", reddit: "Reddit", github: "GitHub", youtube: "YouTube", linkedin: "LinkedIn", x: "X", substack: "Substack", instagram: "Instagram", medium: "Medium", tiktok: "TikTok" };
 const AUTO_HIDE_MS = 25_000;
 
 let current: Suggestion | null = null;

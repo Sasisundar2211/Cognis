@@ -111,6 +111,8 @@ pub fn detect_platform(url: &Url) -> &'static str {
         "instagram"
     } else if is("medium.com") {
         "medium"
+    } else if is("tiktok.com") {
+        "tiktok"
     } else {
         "web"
     }

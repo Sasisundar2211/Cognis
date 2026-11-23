@@ -25,17 +25,15 @@
 
       <main id="signin" hidden>
         <form id="signin-form" class="signin" novalidate>
-          <h1>Sign in to Cognis</h1>
-          <p class="muted">Ask your saved knowledge from any app. Press the hotkey to bring this window back.</p>
+          <h1>Connect Cognis</h1>
+          <p class="muted">In the Cognis web app, open Account, then Desktop companion, and choose Get a pairing code.</p>
           <label for="server">Server address</label>
           <input id="server" type="url" autocomplete="url" placeholder="https://cognis.example.workers.dev" required />
-          <label for="email">Email</label>
-          <input id="email" type="email" autocomplete="email" required />
-          <label for="password">Password</label>
-          <input id="password" type="password" autocomplete="current-password" required />
+          <label for="code">Pairing code</label>
+          <input id="code" autocomplete="one-time-code" placeholder="ABCD-EFGH" maxlength="12" required class="code" />
           <p class="error" id="signin-error" role="alert" hidden></p>
-          <button class="primary" type="submit" id="signin-btn">Sign in</button>
-          <p class="muted small">Your password goes to your Cognis server once. This device then keeps a revocable token in your system keychain. You can sign it out from Account, Devices.</p>
+          <button class="primary" type="submit" id="signin-btn">Connect</button>
+          <p class="muted small">The code works once and expires in 10 minutes. This computer then keeps a revocable token in your system keychain. Remove it any time from Account, Devices.</p>
         </form>
       </main>
 

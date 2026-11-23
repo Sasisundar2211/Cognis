@@ -68,9 +68,9 @@ impl Api {
         self.server.join(path.trim_start_matches('/')).expect("static path")
     }
 
-    /// Exchange email + password for a long-lived device token. The password is not stored.
-    pub async fn sign_in(&self, email: &str, password: &str, device: &str) -> R<(Value, String)> {
-        let res = self.http.post(self.url("/api/auth/sign-in")).json(&json!({ "email": email, "password": password, "device": device })).send().await.map_err(net_err)?;
+    /// Exchange a one-time pairing code (shown in the web app, Account) for a long-lived device token.
+    pub async fn pair(&self, code: &str, device: &str) -> R<(Value, String)> {
+        let res = self.http.post(self.url("/api/auth/pair")).json(&json!({ "code": code, "device": device })).send().await.map_err(net_err)?;
         if !res.status().is_success() {
             return Err(error_from(res).await);
         }
